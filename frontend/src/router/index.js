@@ -99,6 +99,50 @@ export const constantRoutes = [
  */
 export const asyncRoutes = [
   {
+    path: '/team',
+    component: Layout,
+    redirect: '/team/index',
+    name: 'Team',
+    meta: {
+      title: '团队管理',
+      icon: 'peoples',
+      roles: ['super-admin', 'team-admin']
+    },
+    children: [
+      {
+        path: 'index',
+        component: () => import('@/views/team/index'),
+        name: 'TeamManage',
+        meta: { title: '我的团队', icon: 'peoples' }
+      },
+      {
+        path: 'user',
+        component: () => import('@/views/team/user'),
+        name: 'TeamUserManage',
+        meta: { title: '采购用户管理', icon: 'user' }
+      }
+    ]
+  },
+  {
+    path: '/shop',
+    component: Layout,
+    redirect: '/shop/index',
+    name: 'Shop',
+    meta: {
+      title: '店铺管理',
+      icon: 'el-icon-s-shop',
+      roles: ['super-admin', 'team-admin', 'purchaser']
+    },
+    children: [
+      {
+        path: 'index',
+        component: () => import('@/views/shop/index'),
+        name: 'ShopManage',
+        meta: { title: '店铺管理', icon: 'el-icon-s-shop' }
+      }
+    ]
+  },
+  {
     path: '/system',
     component: Layout,
     redirect: '/system/user',

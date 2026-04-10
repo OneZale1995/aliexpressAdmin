@@ -15,7 +15,7 @@
     </div>
 
     <el-table v-loading="listLoading" :data="list" border fit highlight-current-row style="width: 100%">
-      <el-table-column label="ID" prop="id" align="center" width="80" />
+      <el-table-column label="序号" type="index" :index="i => (listQuery.page - 1) * listQuery.limit + i + 1" align="center" width="80" />
       <el-table-column label="操作用户" prop="user_name" align="center" width="120" />
       <el-table-column label="请求方法" align="center" width="100">
         <template slot-scope="{row}">

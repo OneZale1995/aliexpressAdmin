@@ -7,7 +7,7 @@
     </div>
 
     <el-table v-loading="listLoading" :data="list" border fit highlight-current-row style="width: 100%">
-      <el-table-column label="ID" prop="id" align="center" width="80" />
+      <el-table-column label="序号" type="index" :index="i => (listQuery.page - 1) * listQuery.limit + i + 1" align="center" width="80" />
       <el-table-column label="角色标识" prop="name" align="center" />
       <el-table-column label="显示名称" prop="display_name" align="center" />
       <el-table-column label="描述" prop="description" align="center" />

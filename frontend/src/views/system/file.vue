@@ -22,7 +22,7 @@
     </div>
 
     <el-table v-loading="listLoading" :data="list" border fit>
-      <el-table-column label="ID" prop="id" width="80" align="center" />
+      <el-table-column label="序号" type="index" :index="i => (listQuery.page - 1) * listQuery.limit + i + 1" width="80" align="center" />
       <el-table-column label="预览" width="80" align="center">
         <template slot-scope="{row}">
           <el-image v-if="isImage(row.mime_type)" :src="row.url" :preview-src-list="[row.url]" style="width: 40px; height: 40px;" fit="cover" />

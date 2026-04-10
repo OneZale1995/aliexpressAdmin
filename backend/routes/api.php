@@ -10,7 +10,10 @@ use App\Http\Controllers\Api\OperationLogController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\RoleController;
+use App\Http\Controllers\Api\ShopController;
 use App\Http\Controllers\Api\SystemConfigController;
+use App\Http\Controllers\Api\TeamController;
+use App\Http\Controllers\Api\TeamUserController;
 use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
 
@@ -90,4 +93,24 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
 
     // 通用导出
     Route::post('/export', [ExportController::class, 'export']);
+
+    // 团队管理
+    Route::post('/teams/list', [TeamController::class, 'index']);
+    Route::post('/teams/create', [TeamController::class, 'store']);
+    Route::post('/teams/detail', [TeamController::class, 'show']);
+    Route::post('/teams/update', [TeamController::class, 'update']);
+    Route::post('/teams/delete', [TeamController::class, 'destroy']);
+
+    // 团队用户管理（团队管理员添加/管理采购用户）
+    Route::post('/team-users/list', [TeamUserController::class, 'index']);
+    Route::post('/team-users/create', [TeamUserController::class, 'store']);
+    Route::post('/team-users/update', [TeamUserController::class, 'update']);
+    Route::post('/team-users/delete', [TeamUserController::class, 'destroy']);
+
+    // 店铺管理
+    Route::post('/shops/list', [ShopController::class, 'index']);
+    Route::post('/shops/create', [ShopController::class, 'store']);
+    Route::post('/shops/detail', [ShopController::class, 'show']);
+    Route::post('/shops/update', [ShopController::class, 'update']);
+    Route::post('/shops/delete', [ShopController::class, 'destroy']);
 });

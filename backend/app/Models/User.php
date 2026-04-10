@@ -98,4 +98,19 @@ class User extends Authenticatable
     {
         return $this->roles->pluck('name')->toArray();
     }
+
+    public function teams()
+    {
+        return $this->belongsToMany(Team::class, 'team_members');
+    }
+
+    public function adminTeams()
+    {
+        return $this->hasMany(Team::class, 'admin_user_id');
+    }
+
+    public function shops()
+    {
+        return $this->hasMany(Shop::class);
+    }
 }

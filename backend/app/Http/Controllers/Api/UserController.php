@@ -23,13 +23,17 @@ class UserController extends Controller
             $query->where('nickname', 'like', '%' . $request->nickname . '%');
         }
 
+        if ($request->input('all') == 1) {
+            return $this->success($query->orderBy('id', 'desc')->get());
+        }
+
         return $this->paginate($query, $request);
     }
 
     public function store(Request $request)
     {
         $request->validate([
-            'username' => 'required|string|max:100|unique:users',
+            'username' => 'required|string|max:100|unique:admin_users',
             'nickname' => 'nullable|string|max:191',
             'password' => 'required|string|min:6',
             'status' => 'in:0,1',
@@ -39,6 +43,7 @@ class UserController extends Controller
         $user = User::create([
             'username' => $request->username,
             'nickname' => $request->nickname,
+            'name' => $request->nickname ?: $request->username,
             'password' => Hash::make($request->password),
             'status' => $request->get('status', 1),
         ]);
@@ -61,7 +66,7 @@ class UserController extends Controller
         $user = User::findOrFail($request->id);
 
         $request->validate([
-            'username' => 'required|string|max:100|unique:users,username,' . $user->id,
+            'username' => 'required|string|max:100|unique:admin_users,username,' . $user->id,
             'nickname' => 'nullable|string|max:191',
             'status' => 'in:0,1',
             'role_ids' => 'array',

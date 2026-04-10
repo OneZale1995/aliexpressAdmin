@@ -23,7 +23,7 @@
     </div>
 
     <el-table v-loading="listLoading" :data="list" border fit>
-      <el-table-column label="ID" prop="id" width="80" align="center" />
+      <el-table-column label="序号" type="index" :index="i => (listQuery.page - 1) * listQuery.limit + i + 1" width="80" align="center" />
       <el-table-column label="用户名" prop="user_name" width="120" />
       <el-table-column label="IP地址" prop="ip" width="140" />
       <el-table-column label="状态" width="80" align="center">

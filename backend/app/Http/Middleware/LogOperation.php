@@ -13,7 +13,6 @@ class LogOperation
     protected array $except = [
         'api/user/info',
         'api/user/login',
-        'api/*/list',
         'api/operation-logs/*',
         'api/login-logs/*',
         'api/export',
@@ -48,7 +47,7 @@ class LogOperation
         try {
             OperationLog::create([
                 'user_id' => $user?->id ?? 0,
-                'user_name' => $user?->name ?? '',
+                'user_name' => $user?->nickname ?? $user?->username ?? '',
                 'method' => $request->method(),
                 'path' => $request->path(),
                 'ip' => $request->ip(),

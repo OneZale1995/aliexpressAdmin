@@ -131,7 +131,7 @@ export default {
       list: [],
       total: 0,
       listLoading: true,
-      listQuery: { page: 1, limit: 50, name: '', team_id: '' },
+      listQuery: { page: 1, limit: 20, name: '', team_id: '' },
       teamOptions: [],
       memberOptions: [],
       temp: {

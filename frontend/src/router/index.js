@@ -99,6 +99,25 @@ export const constantRoutes = [
  */
 export const asyncRoutes = [
   {
+    path: '/order',
+    component: Layout,
+    redirect: '/order/index',
+    name: 'Order',
+    meta: {
+      title: '订单管理',
+      icon: 'el-icon-s-order',
+      roles: ['super-admin', 'team-admin', 'purchaser']
+    },
+    children: [
+      {
+        path: 'index',
+        component: () => import('@/views/order/index'),
+        name: 'OrderManage',
+        meta: { title: '订单', icon: 'el-icon-s-order' }
+      }
+    ]
+  },
+  {
     path: '/team',
     component: Layout,
     redirect: '/team/index',

@@ -151,5 +151,7 @@ class DatabaseSeeder extends Seeder
         $dictStatus = DictType::firstOrCreate(['code' => 'status'], ['name' => '通用状态', 'code' => 'status', 'status' => 1]);
         DictData::firstOrCreate(['dict_type_id' => $dictStatus->id, 'value' => '1'], ['dict_type_id' => $dictStatus->id, 'label' => '启用', 'value' => '1', 'sort' => 1]);
         DictData::firstOrCreate(['dict_type_id' => $dictStatus->id, 'value' => '0'], ['dict_type_id' => $dictStatus->id, 'label' => '禁用', 'value' => '0', 'sort' => 2]);
+
+        $this->call(OrderStatusDictSeeder::class);
     }
 }

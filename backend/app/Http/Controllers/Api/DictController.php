@@ -32,7 +32,7 @@ class DictController extends Controller
     {
         $request->validate([
             'name' => 'required|string',
-            'code' => 'required|string|unique:dict_types,code',
+            'code' => 'required|string|unique:admin_dict_types,code',
         ]);
 
         $type = DictType::create($request->only(['name', 'code', 'status', 'description']));
@@ -46,7 +46,7 @@ class DictController extends Controller
 
         $request->validate([
             'name' => 'required|string',
-            'code' => 'required|string|unique:dict_types,code,' . $dictType->id,
+            'code' => 'required|string|unique:admin_dict_types,code,' . $dictType->id,
         ]);
 
         $dictType->update($request->only(['name', 'code', 'status', 'description']));
@@ -84,7 +84,7 @@ class DictController extends Controller
     public function dataStore(Request $request)
     {
         $request->validate([
-            'dict_type_id' => 'required|exists:dict_types,id',
+            'dict_type_id' => 'required|exists:admin_dict_types,id',
             'label' => 'required|string',
             'value' => 'required|string',
         ]);

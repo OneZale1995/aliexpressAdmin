@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\FileController;
 use App\Http\Controllers\Api\LoginLogController;
 use App\Http\Controllers\Api\MenuController;
 use App\Http\Controllers\Api\OperationLogController;
+use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\RoleController;
@@ -113,4 +114,27 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     Route::post('/shops/detail', [ShopController::class, 'show']);
     Route::post('/shops/update', [ShopController::class, 'update']);
     Route::post('/shops/delete', [ShopController::class, 'destroy']);
+
+    // 订单管理
+    Route::post('/orders/list', [OrderController::class, 'index']);
+    Route::post('/orders/status-counts', [OrderController::class, 'statusCounts']);
+    Route::post('/orders/sync', [OrderController::class, 'sync']);
+    Route::post('/orders/sync-start', [OrderController::class, 'syncStart']);
+    Route::post('/orders/sync-progress', [OrderController::class, 'syncProgress']);
+    Route::post('/orders/update-comment', [OrderController::class, 'updateComment']);
+    Route::post('/orders/update-backend-fields', [OrderController::class, 'updateBackendFields']);
+    Route::post('/orders/export', [OrderController::class, 'export']);
+    Route::post('/orders/ship', [OrderController::class, 'ship']);
+    Route::post('/orders/label', [OrderController::class, 'printLabel']);
+
+    // 中国邮政物流
+    Route::post('/orders/chinapost/create', [OrderController::class, 'chinaPostCreateOrder']);
+    Route::post('/orders/chinapost/label', [OrderController::class, 'chinaPostLabel']);
+    Route::post('/orders/chinapost/cancel', [OrderController::class, 'chinaPostCancel']);
+
+    // 雷翼/sz56t物流
+    Route::post('/orders/sz56t/create', [OrderController::class, 'sz56tCreateOrder']);
+    Route::post('/orders/sz56t/label', [OrderController::class, 'sz56tLabel']);
+    Route::post('/orders/sz56t/mark-shipped', [OrderController::class, 'sz56tMarkShipped']);
+    Route::post('/orders/sz56t/tracking-number', [OrderController::class, 'sz56tGetTrackingNumber']);
 });

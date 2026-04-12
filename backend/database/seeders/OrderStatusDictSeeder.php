@@ -237,6 +237,15 @@ class OrderStatusDictSeeder extends Seeder
                     ['failed', '失败'],
                 ],
             ],
+            'order_backend_status' => [
+                'name' => '订单后台状态',
+                'items' => [
+                    ['wait_review', '等待审核'],
+                    ['pending_purchase', '待采购'],
+                    ['purchased', '已采购'],
+                    ['shipped', '已发货'],
+                ],
+            ],
         ];
 
         foreach ($dicts as $code => $meta) {

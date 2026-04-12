@@ -21,7 +21,7 @@ class Order extends Model
         'receiver_street', 'receiver_zip', 'logistics_type',
         'logistics_template',
         'tracking_number', 'logistic_order_id', 'sz56t_order_id', 'finish_reason', 'seller_comment',
-        'admin_remark', 'purchase_image', 'shipping_image',
+        'admin_remark', 'backend_status', 'purchase_image', 'shipping_image',
         'purchase_date', 'shipping_date',
         'apply_qianze_at', 'ship_qianze_at',
         'fully_prepared', 'shipping_fee', 'logistics_fee',

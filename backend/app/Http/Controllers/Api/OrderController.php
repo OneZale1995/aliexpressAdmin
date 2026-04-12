@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\DictType;
 use App\Models\Order;
 use App\Models\OrderSyncTask;
 use App\Models\Shop;
@@ -11,11 +12,31 @@ use App\Services\AliExpressService;
 use App\Services\ChinaPostService;
 use App\Services\Sz56tService;
 use App\Traits\ApiResponse;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class OrderController extends Controller
 {
     use ApiResponse;
+
+    protected const BACKEND_STATUS_DICT_CODE = 'order_backend_status';
+
+    protected const STATUS_COUNT_KEYS = [
+        'Unknown',
+        'PlaceOrderSuccess',
+        'PaymentPending',
+        'WaitExamineMoney',
+        'WaitGroup',
+        'WaitSendGoods',
+        'PartialSendGoods',
+        'WaitAcceptGoods',
+        'InCancel',
+        'Close',
+        'Complete',
+        'InFrozen',
+        'InIssue',
+    ];
 
     /**
      * 订单列表（本地数据库）
@@ -25,17 +46,7 @@ class OrderController extends Controller
         $user = $request->user();
         $query = Order::with(['items', 'shop:id,name,email']);
 
-        // 权限过滤
-        if ($user->hasRole('super-admin')) {
-            // 不加限制
-        } elseif ($this->isTeamAdmin($user)) {
-            $teamIds = Team::where('admin_user_id', $user->id)->pluck('id');
-            $shopIds = Shop::whereIn('team_id', $teamIds)->pluck('id');
-            $query->whereIn('shop_id', $shopIds);
-        } else {
-            $shopIds = Shop::where('user_id', $user->id)->pluck('id');
-            $query->whereIn('shop_id', $shopIds);
-        }
+        $this->applyOrderPermissionScope($query, $user);
 
         // 筛选条件
         if ($request->filled('shop_id')) {
@@ -104,6 +115,9 @@ class OrderController extends Controller
                 $q->where('issue_status', $request->issue_status);
             });
         }
+        if ($request->filled('backend_status')) {
+            $query->where('backend_status', $request->backend_status);
+        }
 
         // 下单日期范围
         if ($request->filled('date_start')) {
@@ -127,37 +141,7 @@ class OrderController extends Controller
 
         // 按展示状态过滤（Tab筛选）
         if ($request->filled('display_status')) {
-            $status = $request->display_status;
-            switch ($status) {
-                case 'WaitSendGoods':
-                    $query->where('order_display_status', 'WaitSendGoods');
-                    break;
-                case 'PaymentPending':
-                    $query->whereIn('order_display_status', ['WaitExamineMoney', 'PaymentPending']);
-                    break;
-                case 'MarkedShip':
-                    $query->whereNotNull('marked_ship_at')->whereNull('actual_ship_at');
-                    break;
-                case 'PartialSendGoods':
-                    $query->where('order_display_status', 'PartialSendGoods');
-                    break;
-                case 'Shipped':
-                    $query->whereNotNull('actual_ship_at')
-                          ->whereNotIn('order_display_status', ['Complete', 'Close']);
-                    break;
-                case 'WaitAcceptGoods':
-                    $query->where('order_display_status', 'WaitAcceptGoods');
-                    break;
-                case 'Complete':
-                    $query->where('order_display_status', 'Complete');
-                    break;
-                case 'InIssue':
-                    $query->whereIn('order_display_status', ['InIssue', 'InFrozen']);
-                    break;
-                case 'Close':
-                    $query->where('order_display_status', 'Close');
-                    break;
-            }
+            $this->applyDisplayStatusFilter($query, $request->display_status);
         }
 
         $query->orderBy('ae_created_at', 'desc');
@@ -173,35 +157,253 @@ class OrderController extends Controller
         $user = $request->user();
         $baseQuery = Order::query();
 
-        if ($user->hasRole('super-admin')) {
-            // 不加限制
-        } elseif ($this->isTeamAdmin($user)) {
-            $teamIds = Team::where('admin_user_id', $user->id)->pluck('id');
-            $shopIds = Shop::whereIn('team_id', $teamIds)->pluck('id');
-            $baseQuery->whereIn('shop_id', $shopIds);
-        } else {
-            $shopIds = Shop::where('user_id', $user->id)->pluck('id');
-            $baseQuery->whereIn('shop_id', $shopIds);
-        }
-
-        if ($request->filled('shop_id')) {
-            $baseQuery->where('shop_id', $request->shop_id);
+        $this->applyOrderPermissionScope($baseQuery, $user);
+        $this->applyShopFilter($baseQuery, $request);
+        if ($request->filled('backend_status')) {
+            $baseQuery->where('backend_status', $request->backend_status);
         }
 
         $total = (clone $baseQuery)->count();
-        $counts = [
-            'all' => $total,
-            'WaitSendGoods' => (clone $baseQuery)->where('order_display_status', 'WaitSendGoods')->count(),
-            'PaymentPending' => (clone $baseQuery)->whereIn('order_display_status', ['WaitExamineMoney', 'PaymentPending'])->count(),
-            'MarkedShip' => (clone $baseQuery)->whereNotNull('marked_ship_at')->whereNull('actual_ship_at')->count(),
-            'Shipped' => (clone $baseQuery)->whereNotNull('actual_ship_at')->whereNotIn('order_display_status', ['Complete', 'Close'])->count(),
-            'WaitAcceptGoods' => (clone $baseQuery)->where('order_display_status', 'WaitAcceptGoods')->count(),
-            'Complete' => (clone $baseQuery)->where('order_display_status', 'Complete')->count(),
-            'InIssue' => (clone $baseQuery)->whereIn('order_display_status', ['InIssue', 'InFrozen'])->count(),
-            'Close' => (clone $baseQuery)->where('order_display_status', 'Close')->count(),
-        ];
+        $counts = ['all' => $total];
+        foreach (self::STATUS_COUNT_KEYS as $status) {
+            $counts[$status] = $this->applyDisplayStatusFilter(clone $baseQuery, $status)->count();
+        }
 
         return $this->success($counts);
+    }
+
+    public function statistics(Request $request)
+    {
+        $dailyDate = $request->input('daily_date', now()->format('Y-m-d'));
+        $monthlyMonth = $request->input('monthly_month', now()->format('Y-m'));
+        $defaultRangeStart = now()->subDays(30)->format('Y-m-d');
+        $defaultRangeEnd = now()->format('Y-m-d');
+
+        $orderCountStartDate = $request->input('order_count_start_date', $defaultRangeStart);
+        $orderCountEndDate = $request->input('order_count_end_date', $defaultRangeEnd);
+        $shippedStartDate = $request->input('shipped_start_date', $defaultRangeStart);
+        $shippedEndDate = $request->input('shipped_end_date', $defaultRangeEnd);
+        $profitStartDate = $request->input('profit_start_date', $defaultRangeStart);
+        $profitEndDate = $request->input('profit_end_date', $defaultRangeEnd);
+
+        $dailyStart = Carbon::parse($dailyDate)->startOfDay();
+        $dailyEnd = Carbon::parse($dailyDate)->endOfDay();
+        $monthlyStart = Carbon::parse($monthlyMonth . '-01')->startOfMonth();
+        $monthlyEnd = Carbon::parse($monthlyMonth . '-01')->endOfMonth();
+
+        $dailyQuery = $this->buildStatisticsBaseQuery($request)
+            ->whereBetween('ae_created_at', [$dailyStart, $dailyEnd]);
+        $monthlyQuery = $this->buildStatisticsBaseQuery($request)
+            ->whereBetween('ae_created_at', [$monthlyStart, $monthlyEnd]);
+        $orderCountQuery = $this->buildStatisticsBaseQuery($request)
+            ->whereBetween('ae_created_at', [Carbon::parse($orderCountStartDate)->startOfDay(), Carbon::parse($orderCountEndDate)->endOfDay()]);
+        $shippedQuery = $this->buildStatisticsBaseQuery($request)
+            ->whereBetween('ae_created_at', [Carbon::parse($shippedStartDate)->startOfDay(), Carbon::parse($shippedEndDate)->endOfDay()])
+            ->whereNotNull('actual_ship_at');
+        $profitQuery = $this->buildStatisticsBaseQuery($request)
+            ->whereBetween('ae_created_at', [Carbon::parse($profitStartDate)->startOfDay(), Carbon::parse($profitEndDate)->endOfDay()])
+            ->whereNotNull('actual_ship_at');
+
+        $data = [
+            'daily' => [
+                'date' => $dailyDate,
+                'totals' => $this->getAggregateStats(clone $dailyQuery),
+                'shipped_totals' => $this->getAggregateStats((clone $dailyQuery)->whereNotNull('actual_ship_at')),
+            ],
+            'monthly' => [
+                'month' => $monthlyMonth,
+                'totals' => $this->getAggregateStats(clone $monthlyQuery),
+                'shipped_totals' => $this->getAggregateStats((clone $monthlyQuery)->whereNotNull('actual_ship_at')),
+            ],
+            'order_count' => [
+                'start_date' => $orderCountStartDate,
+                'end_date' => $orderCountEndDate,
+                'total_orders' => (clone $orderCountQuery)->count(),
+                'daily_stats' => $this->getCountByDate(clone $orderCountQuery, 'order_count'),
+                'shop_stats' => $this->getCountByShop(clone $orderCountQuery, 'order_count'),
+            ],
+            'shipped_count' => [
+                'start_date' => $shippedStartDate,
+                'end_date' => $shippedEndDate,
+                'total_shipped' => (clone $shippedQuery)->count(),
+                'daily_stats' => $this->getCountByDate(clone $shippedQuery, 'shipped_count'),
+                'shop_stats' => $this->getCountByShop(clone $shippedQuery, 'shipped_count'),
+            ],
+            'profit' => [
+                'start_date' => $profitStartDate,
+                'end_date' => $profitEndDate,
+                'totals' => $this->getAggregateStats(clone $profitQuery),
+                'daily_stats' => $this->getAggregateByDate(clone $profitQuery),
+                'shop_stats' => $this->getAggregateByShop(clone $profitQuery),
+            ],
+        ];
+
+        return $this->success($data);
+    }
+
+    /**
+     * 后台状态数量统计
+     */
+    public function backendStatusCounts(Request $request)
+    {
+        $user = $request->user();
+        $baseQuery = Order::query();
+
+        $this->applyOrderPermissionScope($baseQuery, $user);
+        $this->applyShopFilter($baseQuery, $request);
+
+        if ($request->filled('display_status')) {
+            $this->applyDisplayStatusFilter($baseQuery, $request->display_status);
+        }
+
+        $total = (clone $baseQuery)->count();
+        $counts = ['all' => $total];
+
+        foreach ($this->getBackendStatusKeys() as $status) {
+            $counts[$status] = (clone $baseQuery)->where('backend_status', $status)->count();
+        }
+
+        return $this->success($counts);
+    }
+
+    protected function applyDisplayStatusFilter($query, string $status)
+    {
+        if (in_array($status, self::STATUS_COUNT_KEYS, true)) {
+            $query->where('order_display_status', $status);
+        }
+
+        return $query;
+    }
+
+    protected function buildStatisticsBaseQuery(Request $request)
+    {
+        $query = Order::query();
+
+        $this->applyOrderPermissionScope($query, $request->user());
+        $this->applyShopFilter($query, $request);
+
+        return $query->where('order_display_status', '!=', 'Close');
+    }
+
+    protected function applyOrderPermissionScope($query, $user): void
+    {
+        if ($user->hasRole('super-admin')) {
+            return;
+        }
+
+        if ($this->isTeamAdmin($user)) {
+            $teamIds = Team::where('admin_user_id', $user->id)->pluck('id');
+            $shopIds = Shop::whereIn('team_id', $teamIds)->pluck('id');
+            $query->whereIn('shop_id', $shopIds);
+
+            return;
+        }
+
+        $shopIds = Shop::where('user_id', $user->id)->pluck('id');
+        $query->whereIn('shop_id', $shopIds);
+    }
+
+    protected function applyShopFilter($query, Request $request): void
+    {
+        if ($request->filled('shop_id')) {
+            $query->where('shop_id', $request->shop_id);
+        }
+    }
+
+    protected function getBackendStatusKeys(): array
+    {
+        $dictType = DictType::where('code', self::BACKEND_STATUS_DICT_CODE)
+            ->where('status', 1)
+            ->first();
+
+        if (!$dictType) {
+            return [];
+        }
+
+        return $dictType->items()
+            ->where('status', 1)
+            ->orderBy('sort')
+            ->pluck('value')
+            ->map(fn($value) => (string) $value)
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    protected function getAggregateStats($query): array
+    {
+        $stats = $query->selectRaw('
+            COUNT(*) as total_orders,
+            COALESCE(SUM(total_amount), 0) as total_sales,
+            COALESCE(SUM(purchase_amount), 0) as total_purchase_cost,
+            COALESCE(SUM(logistics_fee), 0) as total_logistics_fee,
+            COALESCE(SUM(lianlian_fee), 0) as total_lianlian_fee,
+            COALESCE(SUM(platform_fee + affiliate_fee), 0) as total_platform_fee,
+            COALESCE(SUM(total_amount - platform_fee - affiliate_fee - lianlian_fee - purchase_amount - logistics_fee), 0) as total_profit
+        ')->first();
+
+        return [
+            'total_orders' => (int) ($stats->total_orders ?? 0),
+            'total_sales' => round((float) ($stats->total_sales ?? 0), 2),
+            'total_purchase_cost' => round((float) ($stats->total_purchase_cost ?? 0), 2),
+            'total_logistics_fee' => round((float) ($stats->total_logistics_fee ?? 0), 2),
+            'total_lianlian_fee' => round((float) ($stats->total_lianlian_fee ?? 0), 2),
+            'total_platform_fee' => round((float) ($stats->total_platform_fee ?? 0), 2),
+            'total_profit' => round((float) ($stats->total_profit ?? 0), 2),
+        ];
+    }
+
+    protected function getCountByDate($query, string $alias)
+    {
+        return $query
+            ->selectRaw('DATE(ae_created_at) as date, COUNT(*) as ' . $alias)
+            ->groupBy(DB::raw('DATE(ae_created_at)'))
+            ->orderBy('date', 'desc')
+            ->get();
+    }
+
+    protected function getCountByShop($query, string $alias)
+    {
+        return $query
+            ->join('shops', 'orders.shop_id', '=', 'shops.id')
+            ->selectRaw('shops.id as shop_id, shops.name as shop_name, COUNT(*) as ' . $alias)
+            ->groupBy('shops.id', 'shops.name')
+            ->orderBy($alias, 'desc')
+            ->get();
+    }
+
+    protected function getAggregateByDate($query)
+    {
+        return $query
+            ->selectRaw('
+                DATE(ae_created_at) as date,
+                COUNT(*) as total_orders,
+                COALESCE(SUM(total_amount), 0) as total_sales,
+                COALESCE(SUM(purchase_amount), 0) as total_purchase_cost,
+                COALESCE(SUM(logistics_fee), 0) as total_logistics_fee,
+                COALESCE(SUM(total_amount - platform_fee - affiliate_fee - lianlian_fee - purchase_amount - logistics_fee), 0) as total_profit
+            ')
+            ->groupBy(DB::raw('DATE(ae_created_at)'))
+            ->orderBy('date', 'desc')
+            ->get();
+    }
+
+    protected function getAggregateByShop($query)
+    {
+        return $query
+            ->join('shops', 'orders.shop_id', '=', 'shops.id')
+            ->selectRaw('
+                shops.id as shop_id,
+                shops.name as shop_name,
+                COUNT(*) as total_orders,
+                COALESCE(SUM(total_amount), 0) as total_sales,
+                COALESCE(SUM(purchase_amount), 0) as total_purchase_cost,
+                COALESCE(SUM(logistics_fee), 0) as total_logistics_fee,
+                COALESCE(SUM(total_amount - platform_fee - affiliate_fee - lianlian_fee - purchase_amount - logistics_fee), 0) as total_profit
+            ')
+            ->groupBy('shops.id', 'shops.name')
+            ->orderBy('total_profit', 'desc')
+            ->get();
     }
 
     /**
@@ -290,6 +492,7 @@ class OrderController extends Controller
             'id' => 'required|exists:orders,id',
             'seller_comment' => 'nullable|string|max:1000',
             'admin_remark' => 'nullable|string|max:2000',
+            'backend_status' => 'nullable|string|max:50',
             'purchase_image' => 'nullable|string|max:500',
             'shipping_image' => 'nullable|string|max:500',
             'purchase_date' => 'nullable|date',
@@ -312,6 +515,7 @@ class OrderController extends Controller
         $payload = [
             'seller_comment' => $request->input('seller_comment', $order->seller_comment),
             'admin_remark' => $request->input('admin_remark', $order->admin_remark),
+            'backend_status' => $request->input('backend_status', $order->backend_status),
             'purchase_image' => $request->input('purchase_image', $order->purchase_image),
             'shipping_image' => $request->input('shipping_image', $order->shipping_image),
             'purchase_date' => $request->input('purchase_date', $order->purchase_date),
@@ -332,6 +536,29 @@ class OrderController extends Controller
         $order->update($payload);
 
         return $this->success($order, '订单后台信息更新成功');
+    }
+
+    /**
+     * 批量更新后台状态
+     */
+    public function batchUpdateBackendStatus(Request $request)
+    {
+        $request->validate([
+            'ids' => 'required|array|min:1',
+            'ids.*' => 'integer|exists:orders,id',
+            'backend_status' => 'required|string|max:50',
+        ]);
+
+        $query = Order::query()->whereIn('id', $request->input('ids', []));
+        $this->applyOrderPermissionScope($query, $request->user());
+
+        $updated = $query->update([
+            'backend_status' => $request->input('backend_status'),
+        ]);
+
+        return $this->success([
+            'updated' => $updated,
+        ], '批量更新后台状态成功');
     }
 
     /**

@@ -118,11 +118,14 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     // 订单管理
     Route::post('/orders/list', [OrderController::class, 'index']);
     Route::post('/orders/status-counts', [OrderController::class, 'statusCounts']);
+    Route::post('/orders/backend-status-counts', [OrderController::class, 'backendStatusCounts']);
+    Route::post('/orders/statistics', [OrderController::class, 'statistics']);
     Route::post('/orders/sync', [OrderController::class, 'sync']);
     Route::post('/orders/sync-start', [OrderController::class, 'syncStart']);
     Route::post('/orders/sync-progress', [OrderController::class, 'syncProgress']);
     Route::post('/orders/update-comment', [OrderController::class, 'updateComment']);
     Route::post('/orders/update-backend-fields', [OrderController::class, 'updateBackendFields']);
+    Route::post('/orders/batch-update-backend-status', [OrderController::class, 'batchUpdateBackendStatus']);
     Route::post('/orders/export', [OrderController::class, 'export']);
     Route::post('/orders/ship', [OrderController::class, 'ship']);
     Route::post('/orders/label', [OrderController::class, 'printLabel']);

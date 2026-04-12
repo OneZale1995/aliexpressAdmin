@@ -11,8 +11,22 @@ class SystemConfigController extends Controller
 {
     use ApiResponse;
 
+    private const PRESET_CONFIGS = [
+        [
+            'group' => 'finance',
+            'key' => 'cny_exchange_rate',
+            'name' => '人民币汇率',
+            'value' => '7.2000',
+            'type' => 'number',
+            'description' => '用于将订单利润折算为人民币，示例：7.2',
+            'sort' => 1,
+        ],
+    ];
+
     public function index(Request $request)
     {
+        $this->ensurePresetConfigs();
+
         $query = SystemConfig::query();
 
         if ($request->filled('group')) {
@@ -25,6 +39,13 @@ class SystemConfigController extends Controller
         $items = $query->orderBy('group')->orderBy('sort')->get();
 
         return $this->success($items);
+    }
+
+    private function ensurePresetConfigs(): void
+    {
+        foreach (self::PRESET_CONFIGS as $config) {
+            SystemConfig::firstOrCreate(['key' => $config['key']], $config);
+        }
     }
 
     public function store(Request $request)

@@ -3,6 +3,17 @@
     <!-- Tab 状态栏 -->
     <div class="status-tabs">
       <span
+        v-for="tab in backendStatusTabs"
+        :key="tab.key"
+        :class="['status-tab', { active: listQuery.backend_status === tab.key }]"
+        @click="switchBackendStatusTab(tab.key)"
+      >
+        {{ tab.label }}（{{ backendStatusCounts[tab.countKey] || 0 }}）
+      </span>
+    </div>
+
+    <div class="status-tabs backend-tabs">
+      <span
         v-for="tab in statusTabs"
         :key="tab.key"
         :class="['status-tab', { active: listQuery.display_status === tab.key }]"
@@ -117,6 +128,17 @@
     <div style="margin: 12px 0; display: flex; align-items: center; gap: 12px;">
       <el-button type="danger" size="small" icon="el-icon-refresh" :loading="syncing" @click="handleSync">同步订单</el-button>
       <el-button type="primary" plain size="small" icon="el-icon-download" :loading="exporting" @click="handleExport">导出订单</el-button>
+      <el-select v-model="batchBackendStatus" clearable size="small" placeholder="批量修改后台状态" style="width: 180px;">
+        <el-option v-for="item in backendStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
+      </el-select>
+      <el-button
+        type="warning"
+        plain
+        size="small"
+        :disabled="selectedOrders.length === 0 || !batchBackendStatus"
+        @click="handleBatchUpdateBackendStatus"
+      >批量改后台状态</el-button>
+      <span style="color: #999; font-size: 12px;">已选 {{ selectedOrders.length }} 条</span>
       <span style="color: #999; font-size: 12px;">共 {{ total }} 条</span>
       <div style="margin-left: auto;">
         <el-select v-model="listQuery.limit" size="small" style="width: 100px;" @change="handleFilter">
@@ -133,103 +155,139 @@
         暂无订单数据，请先同步
       </div>
 
+      <div v-if="list.length > 0" class="order-list-header">
+        <div class="col-check header-check">
+          <el-checkbox
+            :value="isAllCurrentPageSelected"
+            :indeterminate="isCurrentPageIndeterminate"
+            @change="toggleSelectAllCurrentPage"
+          />
+        </div>
+        <div class="col-images">商品图片</div>
+        <div class="col-goods">商品标题</div>
+        <div class="col-basic">订单基本信息</div>
+        <div class="col-logistics">物流/收货信息</div>
+        <div class="col-amount">金额信息</div>
+        <div class="col-backend">后台字段信息</div>
+        <div class="col-ops">操作</div>
+      </div>
+
       <div v-for="order in list" :key="order.id" class="order-card">
-        <div class="order-card-body">
-          <!-- ① 勾选框 -->
-          <div class="order-check-col">
+        <div class="order-row">
+          <div class="col-check cell-check">
             <el-checkbox :value="selectedOrders.includes(order.id)" @change="toggleSelect(order.id)" />
           </div>
 
-          <!-- ② 产品信息 -->
-          <div class="order-product-col">
-            <div class="product-shop-line">
-              <span class="shop-tag">{{ order.shop ? order.shop.name : '' }}</span>
-              <span class="order-meta">{{ order.shop ? order.shop.email : '' }}</span>
+          <div class="col-images cell-block">
+            <div v-for="item in (order.items || []).slice(0, 2)" :key="item.id" class="image-item">
+              <el-image
+                v-if="item.img_url"
+                :src="item.img_url"
+                :preview-src-list="[item.img_url]"
+                fit="cover"
+                class="goods-thumb"
+              />
+              <div v-else class="goods-thumb goods-thumb--empty">无图</div>
             </div>
-            <div class="product-order-line">
-              <span class="order-meta">单号：<span class="order-id">{{ order.ae_order_id }}</span></span>
-              <span class="order-meta" style="margin-left: 12px;">总额：<span class="highlight">{{ order.total_amount }}</span></span>
-            </div>
-            <div class="product-order-line">
-              <span class="order-meta">下单：{{ formatDate(order.ae_created_at) }}</span>
-            </div>
-            <div v-for="item in order.items" :key="item.id" class="order-item-row">
-              <img :src="item.img_url" class="item-img" @error="onImgError" />
-              <div class="item-info">
-                <div class="item-category">{{ getCategoryFromSku(item) }}</div>
-                <div class="item-id">id: {{ item.ae_item_id }}</div>
-                <div class="item-sku">标题：{{ item.name }}</div>
-                <div class="item-qty">售价：{{ item.item_price }} * {{ item.quantity }}</div>
+            <div v-if="(order.items || []).length === 0" class="empty-text">暂无图片</div>
+          </div>
+
+          <div class="col-goods cell-block">
+            <div v-for="item in (order.items || []).slice(0, 2)" :key="item.id" class="goods-item">
+              <div class="goods-main">
+                <a v-if="getItemLink(item)" :href="getItemLink(item)" target="_blank" rel="noopener noreferrer" class="goods-title goods-title-link">{{ item.name || '-' }}</a>
+                <div v-else class="goods-title">{{ item.name || '-' }}</div>
+                <div class="goods-category">分类：{{ getCategoryFromSku(item) }}</div>
+                <div class="goods-meta">{{ item.sku_code || '-' }} | {{ item.item_price || 0 }} x {{ item.quantity || 1 }}</div>
               </div>
             </div>
+            <div v-if="(order.items || []).length === 0" class="empty-text">暂无商品</div>
+            <div v-if="(order.items || []).length > 2" class="more-text">等 {{ order.items.length }} 件商品</div>
           </div>
 
-          <!-- ③ 状态 + 费用 -->
-          <div class="order-status-col">
-            <el-tag :type="getStatusTagType(order.order_display_status)" size="small" style="margin-bottom: 8px;">
-              {{ getStatusLabel(order.order_display_status) }}
-            </el-tag>
-            <div class="fee-row"><span class="label">平台费用：</span>{{ order.platform_fee || 0 }}</div>
-            <div class="fee-row"><span class="label">联盟费用：</span>{{ order.affiliate_fee || 0 }}</div>
-            <div class="fee-row"><span class="label">预估收入：</span><span class="success-text">{{ order.estimate_revenue || 0 }}</span></div>
+          <div class="col-basic cell-block">
+            <div class="meta-line"><span class="label">店铺名称</span><span class="clip-text">{{ order.shop ? order.shop.name : '-' }}</span></div>
+            <div class="meta-line"><span class="label">店铺邮箱</span><span class="clip-text">{{ order.shop ? order.shop.email : '-' }}</span></div>
+            <div class="meta-line"><span class="label">订单号</span>{{ order.ae_order_id }}</div>
+            <div class="meta-line"><span class="label">下单</span>{{ formatDate(order.ae_created_at) }}</div>
+            <div class="meta-line"><span class="label">买家</span>{{ order.buyer_name || '-' }}</div>
+            <div class="meta-line"><span class="label">状态</span><el-tag :type="getStatusTagType(order.order_display_status)" size="mini">{{ getStatusLabel(order.order_display_status) }}</el-tag></div>
           </div>
 
-          <!-- ④ 订单数据(预计) -->
-          <div class="order-amount-col">
-            <div class="amount-row"><span class="label">总售价：</span><span class="highlight">{{ order.total_amount }}</span></div>
-            <div class="amount-row"><span class="label">手续费：</span><span>{{ calcFee(order) }}</span></div>
-            <div class="amount-row"><span class="label">总回款：</span><span class="success-text">{{ calcTotalBack(order) }}</span></div>
-            <div class="amount-row"><span class="label">连连：</span><span>{{ order.lianlian_fee || 0 }}</span></div>
-            <div class="amount-row"><span class="label">采购额：</span><span>{{ order.purchase_amount || 0 }}</span></div>
-            <div class="amount-row"><span class="label">快递费：</span><span>{{ order.express_fee || order.shipping_fee || 0 }}</span></div>
-            <div class="amount-row"><span class="label">物流费：</span><span>{{ order.logistics_fee || 0 }} 预</span></div>
-            <div class="amount-row"><span class="label">利润：</span><span>{{ calcProfit(order) }}</span></div>
-            <div class="amount-row"><span class="label">利润率：</span><span>{{ calcProfitRate(order) }}%</span></div>
-          </div>
-
-          <!-- ⑤ 收货地址 -->
-          <div class="order-receiver-col">
-            <div><span class="label">姓名：</span>{{ order.receiver_name || order.buyer_name }}</div>
-            <div><span class="label">电话：</span>{{ order.receiver_phone || order.buyer_phone }}</div>
-            <div><span class="label">地址：</span>{{ formatAddress(order) }}</div>
-            <div><span class="label">物流：</span>{{ order.logistics_type || '-' }}</div>
-            <div v-if="order.tracking_number">
-              <span class="label">快递：</span>
-              {{ order.tracking_number }}
-              <el-button type="text" size="mini" icon="el-icon-copy-document" @click="copyText(order.tracking_number)" />
+          <div class="col-logistics cell-block">
+            <div class="meta-line"><span class="label">收件人</span>{{ order.receiver_name || order.buyer_name || '-' }}</div>
+            <div class="meta-line"><span class="label">电话</span>{{ order.receiver_phone || order.buyer_phone || '-' }}</div>
+            <div class="meta-line"><span class="label">地址</span><span class="clip-text">{{ formatAddress(order) }}</span></div>
+            <div class="meta-line"><span class="label">物流</span>{{ getLogisticsTypeLabel(order.logistics_type) }}</div>
+            <div class="meta-line tracking-line">
+              <span class="label">运单号</span>
+              <span class="tracking-value">{{ order.tracking_number || '-' }}</span>
+              <el-button
+                v-if="order.tracking_number"
+                type="text"
+                size="mini"
+                icon="el-icon-copy-document"
+                class="tracking-copy-btn"
+                @click="copyText(order.tracking_number)"
+              />
             </div>
           </div>
 
-          <!-- ⑥ 操作 -->
-          <div class="order-ops-col">
+          <div class="col-amount cell-block">
+            <div class="meta-line"><span class="label">销售额</span><span class="strong">{{ Number(order.total_amount || 0).toFixed(2) }}</span></div>
+            <div class="meta-line"><span class="label">手续费</span>{{ calcFee(order) }}</div>
+            <div class="meta-line"><span class="label">回款</span>{{ calcTotalBack(order) }}</div>
+            <div class="meta-line"><span class="label">采购</span>{{ Number(order.purchase_amount || 0).toFixed(2) }}</div>
+            <div class="meta-line"><span class="label">物流费</span>{{ Number(order.logistics_fee || 0).toFixed(2) }}</div>
+            <div class="meta-line"><span class="label">利润</span><span :class="calcProfit(order) >= 0 ? 'text-success' : 'text-danger'">{{ Number(calcProfit(order) || 0).toFixed(2) }}</span></div>
+            <div class="meta-line"><span class="label">利润率</span><span :class="calcProfit(order) >= 0 ? 'text-success' : 'text-danger'">{{ calcProfitRate(order) }}%</span></div>
+            <div class="meta-line"><span class="label">人民币利润</span><span :class="calcProfit(order) >= 0 ? 'text-success' : 'text-danger'">{{ calcProfitCny(order) }}</span></div>
+          </div>
+
+          <div class="col-backend cell-block">
+            <div class="meta-line"><span class="label">后台状态</span>{{ getBackendStatusLabel(order.backend_status) }}</div>
+            <div class="meta-line"><span class="label">物流模板</span>{{ getLogisticsTemplateLabel(order.logistics_template) }}</div>
+            <div class="meta-line"><span class="label">采购日期</span>{{ order.purchase_date || '-' }}</div>
+            <div class="meta-line"><span class="label">发货日期</span>{{ order.shipping_date || '-' }}</div>
+            <div class="meta-line"><span class="label">后台备注</span><span class="clip-text">{{ order.admin_remark || '-' }}</span></div>
+            <div class="meta-line image-line"><span class="label">采购图片</span>
+              <el-image
+                v-if="order.purchase_image"
+                :src="order.purchase_image"
+                :preview-src-list="[order.purchase_image]"
+                class="backend-thumb"
+                fit="cover"
+              />
+              <span v-else>-</span>
+            </div>
+            <div class="meta-line image-line"><span class="label">上传图片</span>
+              <el-image
+                v-if="order.shipping_image"
+                :src="order.shipping_image"
+                :preview-src-list="[order.shipping_image]"
+                class="backend-thumb"
+                fit="cover"
+              />
+              <span v-else>-</span>
+            </div>
+          </div>
+
+          <div class="col-ops cell-ops">
             <el-button
               v-if="canPrintLabel(order)"
-              type="primary" size="mini" style="width: 80px; margin-bottom: 6px;"
+              type="primary" size="mini"
               @click="handlePrintLabel(order)"
             >打印面单</el-button>
             <el-button
               v-if="order.order_display_status === 'WaitSendGoods'"
-              type="success" size="mini" style="width: 80px; margin-bottom: 6px;"
+              type="success" size="mini"
               @click="handleShip(order)"
             >实际发货</el-button>
-            <el-button
-              type="warning" size="mini" style="width: 80px; margin-bottom: 6px;"
-              @click="handleMarkShip(order)"
-            >更新订单</el-button>
-            <el-button
-              type="info" size="mini" style="width: 80px;"
-              @click="openCommentDialog(order)"
-            >后台更新</el-button>
+            <el-button type="warning" size="mini" @click="handleMarkShip(order)">更新订单</el-button>
+            <el-button type="info" size="mini" @click="openCommentDialog(order)">后台更新</el-button>
           </div>
         </div>
 
-        <!-- 备注行 -->
-        <div v-if="order.admin_remark || order.seller_comment" class="order-comment">
-          <i class="el-icon-chat-dot-round" />
-          <span v-if="order.admin_remark">后台备注：{{ order.admin_remark }}</span>
-          <span v-if="order.admin_remark && order.seller_comment"> | </span>
-          <span v-if="order.seller_comment">平台备注：{{ order.seller_comment }}</span>
-        </div>
       </div>
     </div>
 
@@ -241,6 +299,11 @@
       <el-form label-width="100px">
         <el-form-item label="后台备注">
           <el-input v-model="commentTemp.admin_remark" type="textarea" :rows="3" placeholder="请输入后台备注" />
+        </el-form-item>
+        <el-form-item label="后台状态">
+          <el-select v-model="commentTemp.backend_status" clearable placeholder="请选择后台状态" style="width: 100%;">
+            <el-option v-for="item in backendStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
         </el-form-item>
         <el-form-item label="采购日期">
           <el-date-picker v-model="commentTemp.purchase_date" type="date" value-format="yyyy-MM-dd" placeholder="选择采购日期" style="width: 100%;" />
@@ -444,9 +507,9 @@
 </template>
 
 <script>
-import {fetchOrderList, fetchOrderStatusCounts, syncOrdersStart, fetchSyncProgress, updateOrderBackendFields, shipOrder, getOrderLabel, exportOrders, chinaPostCreateOrder, chinaPostGetLabel, sz56tCreateOrder, sz56tGetLabel, sz56tGetTrackingNumber} from '@/api/order'
+import {fetchOrderList, fetchOrderStatusCounts, fetchOrderBackendStatusCounts, batchUpdateOrderBackendStatus, syncOrdersStart, fetchSyncProgress, updateOrderBackendFields, shipOrder, getOrderLabel, exportOrders, chinaPostCreateOrder, chinaPostGetLabel, sz56tCreateOrder, sz56tGetLabel, sz56tGetTrackingNumber} from '@/api/order'
 import {fetchShopList} from '@/api/shop'
-import {fetchDictByCode} from '@/api/system'
+import {fetchConfigList, fetchDictByCode} from '@/api/system'
 import Pagination from '@/components/Pagination'
 import { getToken } from '@/utils/auth'
 
@@ -552,6 +615,7 @@ const STATUS_TAG_TYPE = {
 
 const ORDER_DICT_CODE = {
   orderDisplayStatus: 'ae_order_display_status',
+  backendStatus: 'order_backend_status',
   orderStatus: 'ae_order_status',
   paymentStatus: 'ae_payment_status',
   deliveryStatus: 'ae_delivery_status',
@@ -572,6 +636,7 @@ export default {
       listLoading: false,
       selectedOrders: [],
       statusCounts: {},
+      backendStatusCounts: {},
       shopOptions: [],
       dateRange: [],
       purchaseDateRange: [],
@@ -580,6 +645,7 @@ export default {
         page: 1,
         limit: 20,
         display_status: '',
+        backend_status: '',
         shop_id: '',
         shop_keyword: '',
         ae_order_id: '',
@@ -604,17 +670,25 @@ export default {
       showFilter: [],
       statusTabs: [
         {key: '', label: '所有订单', countKey: 'all'},
-        {key: 'WaitSendGoods', label: '待处理', countKey: 'WaitSendGoods'},
-        {key: 'PaymentPending', label: '已出单待发货', countKey: 'PaymentPending'},
-        {key: 'MarkedShip', label: '标记发货', countKey: 'MarkedShip'},
-        {key: 'PartialSendGoods', label: '实际发货', countKey: 'PartialSendGoods'},
-        {key: 'Shipped', label: '未实发货', countKey: 'Shipped'},
-        {key: 'WaitAcceptGoods', label: '在途中', countKey: 'WaitAcceptGoods'},
-        {key: 'Close', label: '退回', countKey: 'Close'},
+        {key: 'Unknown', label: '状态未知', countKey: 'Unknown'},
+        {key: 'PlaceOrderSuccess', label: '等待付款', countKey: 'PlaceOrderSuccess'},
+        {key: 'PaymentPending', label: '付款处理中', countKey: 'PaymentPending'},
+        {key: 'WaitExamineMoney', label: '等待付款确认', countKey: 'WaitExamineMoney'},
+        {key: 'WaitGroup', label: '拼团中', countKey: 'WaitGroup'},
+        {key: 'WaitSendGoods', label: '等待发货', countKey: 'WaitSendGoods'},
+        {key: 'PartialSendGoods', label: '部分发货', countKey: 'PartialSendGoods'},
+        {key: 'WaitAcceptGoods', label: '等待收货', countKey: 'WaitAcceptGoods'},
+        {key: 'InCancel', label: '买家申请取消', countKey: 'InCancel'},
         {key: 'Complete', label: '已完成', countKey: 'Complete'},
-        {key: 'InIssue', label: '争议退款', countKey: 'InIssue'},
-        {key: 'taken', label: '已取件', countKey: 'all'},
+        {key: 'Close', label: '已关闭', countKey: 'Close'},
+        {key: 'InFrozen', label: '挂起中', countKey: 'InFrozen'},
+        {key: 'InIssue', label: '订单争议', countKey: 'InIssue'},
       ],
+      backendStatusTabs: [
+        {key: '', label: '全部后台状态', countKey: 'all'},
+      ],
+      backendStatusOptions: [],
+      batchBackendStatus: '',
       // 发货对话框
       shipDialogVisible: false,
       shipping: false,
@@ -635,6 +709,7 @@ export default {
       commentTemp: {
         id: null,
         admin_remark: '',
+        backend_status: '',
         purchase_image: '',
         shipping_image: '',
         purchase_date: '',
@@ -674,21 +749,46 @@ export default {
       syncPollTimer: null,
       dictLabelMap: {},
       issueStatusOptions: [],
+      cnyExchangeRate: 7.2,
     }
   },
   computed: {
     shipDialogTitle() {
       const type = (this.shipForm.logistics_type || '').toUpperCase()
       return type === 'DBS' ? 'DBS 线下发货' : '实际发货'
+    },
+    currentPageOrderIds() {
+      return this.list.map(order => order.id)
+    },
+    isAllCurrentPageSelected() {
+      if (!this.currentPageOrderIds.length) return false
+      return this.currentPageOrderIds.every(id => this.selectedOrders.includes(id))
+    },
+    isCurrentPageIndeterminate() {
+      if (!this.currentPageOrderIds.length) return false
+      const selectedCount = this.currentPageOrderIds.filter(id => this.selectedOrders.includes(id)).length
+      return selectedCount > 0 && selectedCount < this.currentPageOrderIds.length
     }
   },
   created() {
     this.loadShops()
     this.loadOrderDicts()
+    this.loadFinanceConfig()
     this.getStatusCounts()
+    this.getBackendStatusCounts()
     this.getList()
   },
   methods: {
+    loadFinanceConfig() {
+      fetchConfigList({ group: 'finance' }).then(res => {
+        const configs = res.data || []
+        const rateConfig = configs.find(item => item.key === 'cny_exchange_rate')
+        const rate = parseFloat(rateConfig && rateConfig.value)
+        this.cnyExchangeRate = rate > 0 ? rate : 7.2
+      }).catch(() => {
+        this.cnyExchangeRate = 7.2
+      })
+    },
     loadShops() {
       fetchShopList({page: 1, limit: 200}).then(res => {
         this.shopOptions = res.data.items || []
@@ -714,10 +814,27 @@ export default {
       this.issueStatusOptions = issueFromDict.length > 0
         ? issueFromDict
         : Object.entries(ISSUE_STATUS_LABELS).map(([value, label]) => ({ value, label }))
+
+      const backendFromDict = Object.entries(map[ORDER_DICT_CODE.backendStatus] || {}).map(([value, label]) => ({ value, label }))
+      this.backendStatusOptions = backendFromDict
+      this.backendStatusTabs = [
+        { key: '', label: '全部后台状态', countKey: 'all' },
+        ...backendFromDict.map(item => ({ key: item.value, label: item.label, countKey: item.value }))
+      ]
     },
     getStatusCounts() {
-      fetchOrderStatusCounts({shop_id: this.listQuery.shop_id}).then(res => {
+      fetchOrderStatusCounts({
+        shop_id: this.listQuery.shop_id,
+        backend_status: this.listQuery.backend_status,
+      }).then(res => {
         this.statusCounts = res.data || {}
+      })
+    },
+    getBackendStatusCounts() {
+      fetchOrderBackendStatusCounts({
+        shop_id: this.listQuery.shop_id,
+      }).then(res => {
+        this.backendStatusCounts = res.data || {}
       })
     },
     getList() {
@@ -738,6 +855,7 @@ export default {
       fetchOrderList(query).then(res => {
         this.list = res.data.items || []
         this.total = res.data.total || 0
+        this.selectedOrders = this.selectedOrders.filter(id => this.list.some(o => o.id === id))
         this.listLoading = false
       }).catch(() => { this.listLoading = false })
     },
@@ -746,10 +864,17 @@ export default {
       this.listQuery.page = 1
       this.getList()
     },
+    switchBackendStatusTab(key) {
+      this.listQuery.backend_status = key
+      this.listQuery.page = 1
+      this.getList()
+      this.getStatusCounts()
+    },
     handleFilter() {
       this.listQuery.page = 1
       this.getList()
       this.getStatusCounts()
+      this.getBackendStatusCounts()
     },
     resetFilter() {
       this.dateRange = []
@@ -757,6 +882,7 @@ export default {
       this.shippingDateRange = []
       this.listQuery = {
         page: 1, limit: 20, display_status: this.listQuery.display_status,
+        backend_status: this.listQuery.backend_status,
         shop_id: '', shop_keyword: '', ae_order_id: '', tracking_number: '',
         receiver_name: '', receiver_phone: '', buyer_name: '', buyer_phone: '',
         address_keyword: '', seller_comment: '', admin_remark: '',
@@ -766,6 +892,8 @@ export default {
         shipping_date_start: '', shipping_date_end: '',
       }
       this.getList()
+      this.getStatusCounts()
+      this.getBackendStatusCounts()
     },
     handleSync() {
       this.syncDialogVisible = true
@@ -831,6 +959,7 @@ export default {
       this.commentTemp = {
         id: order.id,
         admin_remark: order.admin_remark || '',
+        backend_status: order.backend_status || '',
         purchase_image: order.purchase_image || '',
         shipping_image: order.shipping_image || '',
         purchase_date: order.purchase_date || '',
@@ -883,6 +1012,7 @@ export default {
         const order = this.list.find(o => o.id === this.commentTemp.id)
         if (order) {
           order.admin_remark = this.commentTemp.admin_remark
+          order.backend_status = this.commentTemp.backend_status
           order.purchase_image = this.commentTemp.purchase_image
           order.shipping_image = this.commentTemp.shipping_image
           order.purchase_date = this.commentTemp.purchase_date
@@ -899,8 +1029,34 @@ export default {
           order.apply_qianze_at = this.commentTemp.apply_qianze_at
           order.ship_qianze_at = this.commentTemp.ship_qianze_at
         }
+        this.getBackendStatusCounts()
         this.$notify({title: '成功', message: '订单后台信息已更新', type: 'success', duration: 2000})
       })
+    },
+    handleBatchUpdateBackendStatus() {
+      if (!this.batchBackendStatus) {
+        this.$message.warning('请选择要更新的后台状态')
+        return
+      }
+      if (!this.selectedOrders.length) {
+        this.$message.warning('请先选择订单')
+        return
+      }
+
+      const targetLabel = this.getBackendStatusLabel(this.batchBackendStatus)
+      this.$confirm(`确定将选中的 ${this.selectedOrders.length} 条订单更新为“${targetLabel}”吗？`, '批量更新后台状态', { type: 'warning' })
+        .then(() => {
+          return batchUpdateOrderBackendStatus({
+            ids: this.selectedOrders,
+            backend_status: this.batchBackendStatus,
+          })
+        })
+        .then(res => {
+          this.$message.success(res.message || '批量更新成功')
+          this.getList()
+          this.getBackendStatusCounts()
+        })
+        .catch(() => {})
     },
     buildExportQuery() {
       const query = Object.assign({}, this.listQuery)
@@ -1102,6 +1258,9 @@ export default {
     getDeliveryStatusLabel(status) {
       return this.translateByCode(status, ORDER_DICT_CODE.deliveryStatus, DELIVERY_STATUS_LABELS)
     },
+    getBackendStatusLabel(status) {
+      return this.translateByCode(status, ORDER_DICT_CODE.backendStatus, {})
+    },
     getAntifraudStatusLabel(status) {
       return this.translateByCode(status, ORDER_DICT_CODE.antifraudStatus, ANTIFRAUD_STATUS_LABELS)
     },
@@ -1117,6 +1276,12 @@ export default {
     getSyncStatusLabel(status) {
       return this.translateByCode(status, ORDER_DICT_CODE.syncStatus, SYNC_STATUS_LABELS)
     },
+    getLogisticsTemplateLabel(template) {
+      if (template === 'offline_leiyi') return '线下-雷翼/邮政'
+      if (template === 'offline_epacket') return '线下-E邮宝'
+      if (template === 'online') return '线上'
+      return template || '-'
+    },
     getStatusTagType(status) {
       return STATUS_TAG_TYPE[status] || ''
     },
@@ -1127,6 +1292,62 @@ export default {
     formatAddress(order) {
       const parts = [order.receiver_country, order.receiver_region, order.receiver_city, order.receiver_street, order.receiver_zip]
       return parts.filter(Boolean).join(', ') || order.delivery_address || '-'
+    },
+    getItemLink(item) {
+      if (!item || typeof item !== 'object') return ''
+
+      const candidates = [
+        item.item_url,
+        item.product_url,
+        item.detail_url,
+        item.ae_item_url,
+        item.url,
+        item.link,
+      ]
+
+      if (item.properties && typeof item.properties === 'object') {
+        candidates.push(
+          item.properties.item_url,
+          item.properties.product_url,
+          item.properties.detail_url,
+          item.properties.url,
+          item.properties.link
+        )
+      }
+
+      const raw = candidates.find(v => typeof v === 'string' && v.trim())
+      if (!raw) {
+        const itemIdRaw = [
+          item.ae_item_id,
+          item.item_id,
+          item.product_id,
+          item.properties && item.properties.ae_item_id,
+          item.properties && item.properties.item_id,
+          item.properties && item.properties.product_id,
+        ].find(v => v !== undefined && v !== null && String(v).trim() !== '')
+
+        if (!itemIdRaw) return ''
+
+        const itemId = String(itemIdRaw).trim()
+        const itemPath = itemId.includes('_') ? itemId : `1_${itemId}`
+        const skuIdRaw = [
+          item.ae_sku_id,
+          item.sku_id,
+          item.properties && item.properties.ae_sku_id,
+          item.properties && item.properties.sku_id,
+        ].find(v => v !== undefined && v !== null && String(v).trim() !== '')
+
+        let builtUrl = `https://aliexpress.ru/item/${itemPath}.html`
+        if (skuIdRaw) {
+          builtUrl += `?sku_id=${encodeURIComponent(String(skuIdRaw).trim())}`
+        }
+        return builtUrl
+      }
+
+      const value = raw.trim()
+      if (/^https?:\/\//i.test(value)) return value
+      if (/^\/\//.test(value)) return `https:${value}`
+      return `https://${value}`
     },
     getCategoryFromSku(item) {
       if (item.properties && typeof item.properties === 'object') {
@@ -1142,6 +1363,12 @@ export default {
       const base = parseFloat(order.total_amount || 0)
       if (!base) return '0.00'
       return ((profit / base) * 100).toFixed(2)
+    },
+    calcProfitCny(order) {
+      const profit = this.calcProfit(order)
+      const rate = parseFloat(this.cnyExchangeRate || 0)
+      if (!(rate > 0)) return '0.00'
+      return (profit / rate).toFixed(2)
     },
     calcFee(order) {
       return (parseFloat(order.platform_fee || 0) + parseFloat(order.affiliate_fee || 0)).toFixed(2)
@@ -1172,6 +1399,14 @@ export default {
       } else {
         this.selectedOrders.push(id)
       }
+    },
+    toggleSelectAllCurrentPage(checked) {
+      const pageIds = this.currentPageOrderIds
+      if (checked) {
+        this.selectedOrders = Array.from(new Set([...this.selectedOrders, ...pageIds]))
+        return
+      }
+      this.selectedOrders = this.selectedOrders.filter(id => !pageIds.includes(id))
     },
     onImgError(e) {
       e.target.style.display = 'none'
@@ -1208,109 +1443,254 @@ export default {
 }
 .status-tab:hover { color: #409eff; }
 
-.order-card {
-  border: 1px solid #e8e8e8;
-  border-radius: 4px;
-  margin-bottom: 12px;
+.backend-tabs {
+  margin-top: -4px;
 }
-.order-card-body {
-  display: flex;
-  gap: 0;
-}
-.order-check-col {
-  width: 40px;
-  flex-shrink: 0;
-  padding: 12px 4px 12px 12px;
-  display: flex;
-  align-items: flex-start;
-  border-right: 1px solid #f0f0f0;
-}
-.order-product-col {
-  flex: 1;
-  padding: 10px 12px;
-  border-right: 1px solid #f0f0f0;
-  min-width: 0;
-}
-.product-shop-line,
-.product-order-line {
-  margin-bottom: 4px;
-  font-size: 12px;
-  color: #666;
-}
-.shop-tag {
-  font-weight: 600;
-  color: #333;
-  background: #e8f4ff;
-  padding: 2px 8px;
-  border-radius: 3px;
-  font-size: 12px;
-  margin-right: 8px;
-}
-.order-id {
-  font-family: monospace;
-  font-size: 13px;
-  color: #333;
-}
-.order-meta { font-size: 12px; }
-.order-item-row {
-  display: flex;
+
+.order-list-header {
+  display: grid;
+  grid-template-columns: 50px 100px 1.05fr 0.85fr 1.2fr 0.95fr 1.05fr 130px;
   gap: 8px;
-  padding: 6px 0;
-  border-bottom: 1px solid #fafafa;
-}
-.order-item-row:last-child { border-bottom: none; }
-.item-img { width: 60px; height: 60px; object-fit: cover; border: 1px solid #eee; border-radius: 3px; flex-shrink: 0; }
-.item-info { font-size: 12px; min-width: 0; }
-.item-info > div { margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.item-category { font-weight: 600; color: #333; }
-.item-id, .item-sku { color: #999; }
-.item-qty { color: #666; }
-.order-status-col {
-  width: 150px;
-  flex-shrink: 0;
-  padding: 12px;
+  align-items: center;
+  background: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  color: #606266;
   font-size: 12px;
-  border-right: 1px solid #f0f0f0;
+  font-weight: 600;
 }
-.fee-row { margin-bottom: 4px; color: #666; }
-.order-amount-col {
-  width: 160px;
-  flex-shrink: 0;
-  padding: 12px;
-  font-size: 12px;
-  border-right: 1px solid #f0f0f0;
-}
-.amount-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
-.label { color: #999; }
-.highlight { font-weight: 600; color: #e6a23c; }
-.success-text { color: #67c23a; font-weight: 600; }
 
-.order-receiver-col {
-  width: 240px;
-  flex-shrink: 0;
-  padding: 12px;
-  font-size: 12px;
-  color: #333;
-  border-right: 1px solid #f0f0f0;
-  line-height: 1.8;
+.order-card {
+  border: none;
+  border-bottom: 1px solid #ebeef5;
+  border-radius: 0;
+  background: #fff;
+  margin-bottom: 0;
+  overflow: hidden;
 }
-.order-receiver-col .label { color: #999; }
 
-.order-ops-col {
-  width: 100px;
-  flex-shrink: 0;
-  padding: 12px 8px;
+.order-card:first-child {
+  border-top: 1px solid #ebeef5;
+}
+
+.order-row {
+  display: grid;
+  grid-template-columns: 50px 100px 1.05fr 0.85fr 1.2fr 0.95fr 1.05fr 130px;
+  gap: 8px;
+  align-items: stretch;
+  padding: 10px;
+}
+
+.cell-check {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 2px;
+}
+
+.header-check {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.header-check .el-checkbox {
+  margin-right: 0;
+}
+
+.cell-block {
+  min-width: 0;
+  border-right: 1px dashed #eef1f6;
+  padding-right: 6px;
+}
+
+.cell-ops {
+  border-right: none;
+  padding-right: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
+  gap: 4px;
+  align-items: stretch;
 }
 
-.order-comment {
-  padding: 6px 14px;
-  background: #fffbe6;
+.cell-ops .el-button {
+  width: 100%;
+  margin-left: 0;
+}
+
+.cell-ops .el-button + .el-button {
+  margin-left: 0;
+}
+
+.cell-ops .text-link {
+  display: inline-flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.meta-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
   font-size: 12px;
-  color: #856404;
-  border-top: 1px solid #f0e68c;
+  color: #606266;
+  line-height: 1.35;
+  margin-bottom: 2px;
+}
+
+.label {
+  color: #909399;
+  width: 64px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.tracking-line {
+  align-items: center;
+}
+
+.tracking-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tracking-copy-btn {
+  margin-left: 2px;
+  padding: 0;
+}
+
+.goods-item {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.image-item {
+  margin-bottom: 6px;
+}
+
+.goods-thumb {
+  width: 56px;
+  height: 56px;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.goods-thumb--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #b0b6bf;
+  background: #fafafa;
+}
+
+.goods-main {
+  min-width: 0;
+}
+
+.goods-title {
+  font-size: 12px;
+  color: #303133;
+  line-height: 1.4;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.goods-category {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #8d96a3;
+}
+
+.goods-title-link {
+  color: #409eff;
+  text-decoration: underline;
+}
+
+.goods-title-link:hover {
+  color: #1f78d1;
+  text-decoration: underline;
+}
+
+.goods-meta {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 2px;
+}
+
+.empty-text,
+.more-text {
+  color: #909399;
+  font-size: 12px;
+}
+
+.clip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  line-clamp: 2;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.image-line {
+  align-items: center;
+}
+
+.backend-thumb {
+  width: 36px;
+  height: 36px;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+}
+
+.strong {
+  font-weight: 700;
+  color: #303133;
+}
+
+.text-link {
+  color: #409eff;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.text-link:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 1400px) {
+  .order-list-header,
+  .order-row {
+    grid-template-columns: 44px 86px 1fr 0.8fr 1.05fr 0.9fr 0.95fr 120px;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .order-list-header {
+    display: none;
+  }
+
+  .order-row {
+    grid-template-columns: 40px 1fr;
+    gap: 8px;
+  }
+
+  .cell-block,
+  .cell-ops {
+    grid-column: 2;
+    border-right: none;
+    border-top: 1px dashed #f0f2f5;
+    padding-top: 6px;
+    padding-right: 0;
+  }
 }
 </style>

@@ -46,7 +46,7 @@ class Sz56tService
                     'password' => $this->password,
                 ]);
 
-            $data = $response->json();
+            $data = $this->decodeResponse($response->body());
 
             if (isset($data['ack']) && $data['ack'] === 'true') {
                 $this->customerId = $data['customer_id'];
@@ -73,7 +73,7 @@ class Sz56tService
             $response = Http::timeout(15)
                 ->get($this->apiUrl . '/getProductList.htm');
 
-            return ['success' => true, 'data' => $response->json()];
+            return ['success' => true, 'data' => $this->decodeResponse($response->body())];
         } catch (\Exception $e) {
             return ['success' => false, 'message' => $e->getMessage()];
         }
@@ -115,7 +115,7 @@ class Sz56tService
                     'param' => $paramJson,
                 ]);
 
-            $data = $response->json();
+            $data = $this->decodeResponse($response->body());
 
             Log::info('Sz56t createOrder response', [
                 'order_id' => $order->ae_order_id,
@@ -178,7 +178,7 @@ class Sz56tService
                     'order_customerinvoicecode' => $customerInvoiceCode,
                 ]);
 
-            $data = $response->json();
+            $data = $this->decodeResponse($response->body());
             return ['success' => true, 'data' => $data];
         } catch (\Exception $e) {
             return ['success' => false, 'message' => $e->getMessage()];
@@ -204,7 +204,7 @@ class Sz56tService
                     'documentCode' => $trackingNumber,
                 ]);
 
-            $data = $response->json();
+            $data = $this->decodeResponse($response->body());
             return ['success' => true, 'data' => $data];
         } catch (\Exception $e) {
             return ['success' => false, 'message' => $e->getMessage()];
@@ -222,7 +222,7 @@ class Sz56tService
                     'documentCode' => $documentCode,
                 ]);
 
-            $data = $response->json();
+            $data = $this->decodeResponse($response->body());
 
             if (($data['status'] ?? '') === '200') {
                 return [
@@ -248,10 +248,39 @@ class Sz56tService
             $response = Http::timeout(15)
                 ->get($this->apiUrl . '/selectLabelType.htm');
 
-            return ['success' => true, 'data' => $response->json()];
+            return ['success' => true, 'data' => $this->decodeResponse($response->body())];
         } catch (\Exception $e) {
             return ['success' => false, 'message' => $e->getMessage()];
         }
+    }
+
+    /**
+     * sz56t 部分接口返回单引号 JSON，需要做兼容解析。
+     */
+    protected function decodeResponse(string $body)
+    {
+        $body = trim($body);
+        if ($body === '') {
+            return null;
+        }
+
+        // 兼容接口返回 GBK/GB2312 等编码，避免 json_decode 因编码失败。
+        if (!mb_check_encoding($body, 'UTF-8')) {
+            $body = mb_convert_encoding($body, 'UTF-8', 'UTF-8,GBK,GB2312,BIG5');
+        }
+
+        $decoded = json_decode($body, true);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            return $decoded;
+        }
+
+        $normalized = str_replace("'", '"', $body);
+        $decoded = json_decode($normalized, true);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            return $decoded;
+        }
+
+        return null;
     }
 
     /**
@@ -266,14 +295,16 @@ class Sz56tService
             $qty = max(1, (int) ($item->quantity ?? 1));
             $price = (float) ($item->item_price ?? 0);
             $weight = (int) ($options['item_weight'] ?? 0);
+            $itemTitle = (string) ($item->name ?? 'Product');
+            $skuCode = (string) ($item->sku_code ?? ($item->ae_sku_id ?? ''));
 
             $invoiceParams[] = [
                 'invoice_amount' => round($price * $qty, 2),
                 'invoice_pcs' => $qty,
-                'invoice_title' => mb_substr($item->item_title ?: 'Product', 0, 50),
+                'invoice_title' => mb_substr($itemTitle, 0, 50),
                 'invoice_weight' => $weight ?: null,
-                'sku' => mb_substr($item->item_title ?: '商品', 0, 50),
-                'sku_code' => $item->sku_id ?: '',
+                'sku' => mb_substr($itemTitle ?: '商品', 0, 50),
+                'sku_code' => $skuCode,
                 'invoice_currency' => 'USD',
                 'origin_country' => 'CN',
             ];
@@ -305,11 +336,11 @@ class Sz56tService
             'consignee_name' => $order->receiver_name ?: ($order->buyer_name ?: ''),
             'consignee_address' => $order->receiver_street ?: ($order->delivery_address ?: ''),
             'consignee_telephone' => $order->receiver_phone ?: '',
-            'consignee_mobile' => $order->receiver_mobile ?: ($order->receiver_phone ?: ''),
+            'consignee_mobile' => $order->receiver_phone ?: '',
             'consignee_city' => $order->receiver_city ?: '',
             'consignee_state' => $order->receiver_region ?: '',
-            'consignee_postcode' => $order->receiver_zip_code ?: '',
-            'country' => $order->receiver_country_code ?: 'RU',
+            'consignee_postcode' => $order->receiver_zip ?: '',
+            'country' => $order->buyer_country_code ?: 'RU',
             'consignee_email' => '',
             // 申报信息
             'orderInvoiceParam' => $invoiceParams,

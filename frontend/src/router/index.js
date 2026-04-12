@@ -114,6 +114,12 @@ export const asyncRoutes = [
         component: () => import('@/views/order/index'),
         name: 'OrderManage',
         meta: { title: '订单', icon: 'el-icon-s-order' }
+      },
+      {
+        path: 'statistics',
+        component: () => import('@/views/order/statistics'),
+        name: 'OrderStatistics',
+        meta: { title: '订单统计', icon: 'el-icon-data-analysis' }
       }
     ]
   },

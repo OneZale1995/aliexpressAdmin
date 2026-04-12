@@ -8,6 +8,14 @@ export function fetchOrderStatusCounts(data) {
   return request({ url: '/orders/status-counts', method: 'post', data })
 }
 
+export function fetchOrderBackendStatusCounts(data) {
+  return request({ url: '/orders/backend-status-counts', method: 'post', data })
+}
+
+export function fetchOrderStatistics(data) {
+  return request({ url: '/orders/statistics', method: 'post', data })
+}
+
 export function syncOrders(data) {
   return request({ url: '/orders/sync', method: 'post', data })
 }
@@ -26,6 +34,10 @@ export function updateOrderComment(data) {
 
 export function updateOrderBackendFields(data) {
   return request({ url: '/orders/update-backend-fields', method: 'post', data })
+}
+
+export function batchUpdateOrderBackendStatus(data) {
+  return request({ url: '/orders/batch-update-backend-status', method: 'post', data })
 }
 
 export function shipOrder(data) {

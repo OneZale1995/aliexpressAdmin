@@ -20,7 +20,7 @@ class Order extends Model
         'receiver_country', 'receiver_region', 'receiver_city',
         'receiver_street', 'receiver_zip', 'logistics_type',
         'logistics_template',
-        'tracking_number', 'logistic_order_id', 'sz56t_order_id', 'finish_reason', 'seller_comment',
+        'tracking_number', 'logistic_order_id', 'handover_list_id', 'handover_list_status', 'sz56t_order_id', 'finish_reason', 'seller_comment',
         'admin_remark', 'backend_status', 'purchase_image', 'shipping_image',
         'purchase_date', 'shipping_date',
         'apply_qianze_at', 'ship_qianze_at',
@@ -47,6 +47,7 @@ class Order extends Model
         'calculated_logistics_fee' => 'decimal:2',
         'logistics_fee_override' => 'boolean',
         'logistic_order_id' => 'integer',
+        'handover_list_id' => 'integer',
         'fully_prepared' => 'boolean',
         'disputes' => 'array',
         'raw_data' => 'array',
@@ -73,5 +74,78 @@ class Order extends Model
     public function items()
     {
         return $this->hasMany(OrderItem::class);
+    }
+
+    public function logistics()
+    {
+        return $this->hasMany(OrderLogistics::class);
+    }
+
+    public function currentLogistics()
+    {
+        return $this->hasOne(OrderLogistics::class)->where('is_primary', true);
+    }
+
+    public function getLogisticsTypeAttribute($value)
+    {
+        return $this->resolveCurrentLogisticsValue('logistics_mode', $value);
+    }
+
+    public function getLogisticsTemplateAttribute($value)
+    {
+        return $this->resolveCurrentLogisticsValue('template_code', $value);
+    }
+
+    public function getTrackingNumberAttribute($value)
+    {
+        return $this->resolveCurrentLogisticsValue('tracking_number', $value);
+    }
+
+    public function getLogisticOrderIdAttribute($value)
+    {
+        return $this->resolveCurrentLogisticsValue('platform_logistic_order_id', $value);
+    }
+
+    public function getHandoverListIdAttribute($value)
+    {
+        return $this->resolveCurrentLogisticsValue('handover_list_id', $value);
+    }
+
+    public function getHandoverListStatusAttribute($value)
+    {
+        return $this->resolveCurrentLogisticsValue('handover_list_status', $value);
+    }
+
+    public function getSz56tOrderIdAttribute($value)
+    {
+        $logistics = $this->getCurrentLogisticsRelation();
+        if ($logistics && $logistics->provider_code === 'sz56t') {
+            return $logistics->external_order_id;
+        }
+
+        return $value;
+    }
+
+    private function resolveCurrentLogisticsValue(string $field, $fallback = null)
+    {
+        $logistics = $this->getCurrentLogisticsRelation();
+
+        if (!$logistics) {
+            return $fallback;
+        }
+
+        return $logistics->{$field} ?? $fallback;
+    }
+
+    private function getCurrentLogisticsRelation(): ?OrderLogistics
+    {
+        if ($this->relationLoaded('currentLogistics')) {
+            return $this->getRelation('currentLogistics');
+        }
+
+        $logistics = $this->currentLogistics()->first();
+        $this->setRelation('currentLogistics', $logistics);
+
+        return $logistics;
     }
 }

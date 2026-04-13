@@ -39,6 +39,13 @@ return [
         'base_url' => env('ALIEXPRESS_BASE_URL', 'https://openapi.aliexpress.ru'),
         // Windows 本地开发环境可临时关闭证书校验；生产环境建议开启
         'verify_ssl' => env('ALIEXPRESS_VERIFY_SSL', false),
+        'fbs_mock' => env('ALIEXPRESS_FBS_MOCK', env('APP_ENV', 'production') === 'local'),
+        'fbs_default_length' => env('ALIEXPRESS_FBS_DEFAULT_LENGTH', 20),
+        'fbs_default_width' => env('ALIEXPRESS_FBS_DEFAULT_WIDTH', 10),
+        'fbs_default_height' => env('ALIEXPRESS_FBS_DEFAULT_HEIGHT', 5),
+        'fbs_default_weight' => env('ALIEXPRESS_FBS_DEFAULT_WEIGHT', 0.5),
+        'transfer_sheet_create_path' => env('ALIEXPRESS_TRANSFER_SHEET_CREATE_PATH', ''),
+        'transfer_sheet_print_path' => env('ALIEXPRESS_TRANSFER_SHEET_PRINT_PATH', ''),
     ],
 
     'chinapost' => [

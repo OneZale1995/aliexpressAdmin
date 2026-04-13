@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\LoginLogController;
 use App\Http\Controllers\Api\MenuController;
 use App\Http\Controllers\Api\OperationLogController;
 use App\Http\Controllers\Api\OrderController;
+use App\Http\Controllers\Api\OrderLogisticsController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\RoleController;
@@ -127,17 +128,26 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     Route::post('/orders/update-backend-fields', [OrderController::class, 'updateBackendFields']);
     Route::post('/orders/batch-update-backend-status', [OrderController::class, 'batchUpdateBackendStatus']);
     Route::post('/orders/export', [OrderController::class, 'export']);
-    Route::post('/orders/ship', [OrderController::class, 'ship']);
-    Route::post('/orders/label', [OrderController::class, 'printLabel']);
+    Route::post('/orders/ship', [OrderLogisticsController::class, 'ship']);
+    Route::post('/orders/label', [OrderLogisticsController::class, 'printLabel']);
+    Route::post('/orders/transfer-sheet', [OrderLogisticsController::class, 'transferSheet']);
+    Route::post('/orders/fbs/workflow', [OrderLogisticsController::class, 'fbsWorkflow']);
+    Route::post('/orders/fbs/logistic-order/create', [OrderLogisticsController::class, 'fbsCreateLogisticOrder']);
+    Route::post('/orders/fbs/handover-list/create', [OrderLogisticsController::class, 'fbsCreateHandoverList']);
+    Route::post('/orders/fbs/handover-list/add-orders', [OrderLogisticsController::class, 'fbsAddLogisticOrdersToHandover']);
+    Route::post('/orders/fbs/handover-list/remove-orders', [OrderLogisticsController::class, 'fbsRemoveLogisticOrdersFromHandover']);
+    Route::post('/orders/fbs/handover-list/label', [OrderLogisticsController::class, 'fbsPrintHandoverList']);
+    Route::post('/orders/fbs/handover-list/ready-for-pickup', [OrderLogisticsController::class, 'fbsReadyForPickup']);
+    Route::post('/orders/fbs/handover-list/transfer', [OrderLogisticsController::class, 'fbsTransferHandoverList']);
 
     // 中国邮政物流
-    Route::post('/orders/chinapost/create', [OrderController::class, 'chinaPostCreateOrder']);
-    Route::post('/orders/chinapost/label', [OrderController::class, 'chinaPostLabel']);
-    Route::post('/orders/chinapost/cancel', [OrderController::class, 'chinaPostCancel']);
+    Route::post('/orders/chinapost/create', [OrderLogisticsController::class, 'chinaPostCreateOrder']);
+    Route::post('/orders/chinapost/label', [OrderLogisticsController::class, 'chinaPostLabel']);
+    Route::post('/orders/chinapost/cancel', [OrderLogisticsController::class, 'chinaPostCancel']);
 
     // 雷翼/sz56t物流
-    Route::post('/orders/sz56t/create', [OrderController::class, 'sz56tCreateOrder']);
-    Route::post('/orders/sz56t/label', [OrderController::class, 'sz56tLabel']);
-    Route::post('/orders/sz56t/mark-shipped', [OrderController::class, 'sz56tMarkShipped']);
-    Route::post('/orders/sz56t/tracking-number', [OrderController::class, 'sz56tGetTrackingNumber']);
+    Route::post('/orders/sz56t/create', [OrderLogisticsController::class, 'sz56tCreateOrder']);
+    Route::post('/orders/sz56t/label', [OrderLogisticsController::class, 'sz56tLabel']);
+    Route::post('/orders/sz56t/mark-shipped', [OrderLogisticsController::class, 'sz56tMarkShipped']);
+    Route::post('/orders/sz56t/tracking-number', [OrderLogisticsController::class, 'sz56tGetTrackingNumber']);
 });

@@ -19,6 +19,10 @@ import './permission' // permission control
 import './utils/error-log' // error log
 
 import * as filters from './filters' // global filters
+import { fetchConfigList } from '@/api/system'
+import { getToken } from '@/utils/auth'
+import getPageTitle from '@/utils/get-page-title'
+import { updateSiteSettingsFromConfigs } from '@/utils/site-settings'
 
 Vue.use(Element, {
   size: Cookies.get('size') || 'medium', // set element-ui default size
@@ -38,3 +42,11 @@ new Vue({
   store,
   render: h => h(App)
 })
+
+if (getToken()) {
+  fetchConfigList({ group: 'site' }).then(response => {
+    updateSiteSettingsFromConfigs(Array.isArray(response.data) ? response.data : [])
+    const currentTitle = router.currentRoute.meta && router.currentRoute.meta.title
+    document.title = getPageTitle(currentTitle)
+  }).catch(() => {})
+}

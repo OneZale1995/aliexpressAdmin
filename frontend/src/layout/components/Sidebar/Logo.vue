@@ -14,6 +14,15 @@
 </template>
 
 <script>
+import {
+  getSiteLogo,
+  getSiteTitle,
+  subscribeSiteSettings,
+  unsubscribeSiteSettings
+} from '@/utils/site-settings'
+
+const DEFAULT_LOGO = 'https://wpimg.wallstcn.com/69a1c46c-eb1c-4b46-8bd4-e9e686ef5251.png'
+
 export default {
   name: 'SidebarLogo',
   props: {
@@ -24,9 +33,20 @@ export default {
   },
   data() {
     return {
-      title: 'Vue Element Admin',
-      logo: 'https://wpimg.wallstcn.com/69a1c46c-eb1c-4b46-8bd4-e9e686ef5251.png'
+      title: getSiteTitle(),
+      logo: getSiteLogo() || DEFAULT_LOGO
     }
+  },
+  created() {
+    this.handleSiteSettingsChange = () => {
+      this.title = getSiteTitle()
+      this.logo = getSiteLogo() || DEFAULT_LOGO
+    }
+
+    subscribeSiteSettings(this.handleSiteSettingsChange)
+  },
+  beforeDestroy() {
+    unsubscribeSiteSettings(this.handleSiteSettingsChange)
   }
 }
 </script>

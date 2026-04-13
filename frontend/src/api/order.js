@@ -48,6 +48,42 @@ export function getOrderLabel(data) {
   return request({ url: '/orders/label', method: 'post', data })
 }
 
+export function createOrderTransferSheet(data) {
+  return request({ url: '/orders/transfer-sheet', method: 'post', data })
+}
+
+export function fetchFbsWorkflow(data) {
+  return request({ url: '/orders/fbs/workflow', method: 'post', data })
+}
+
+export function createFbsLogisticOrder(data) {
+  return request({ url: '/orders/fbs/logistic-order/create', method: 'post', data })
+}
+
+export function createFbsHandoverList(data) {
+  return request({ url: '/orders/fbs/handover-list/create', method: 'post', data })
+}
+
+export function addFbsLogisticOrdersToHandover(data) {
+  return request({ url: '/orders/fbs/handover-list/add-orders', method: 'post', data })
+}
+
+export function removeFbsLogisticOrdersFromHandover(data) {
+  return request({ url: '/orders/fbs/handover-list/remove-orders', method: 'post', data })
+}
+
+export function printFbsHandoverList(data) {
+  return request({ url: '/orders/fbs/handover-list/label', method: 'post', data })
+}
+
+export function readyFbsHandoverForPickup(data) {
+  return request({ url: '/orders/fbs/handover-list/ready-for-pickup', method: 'post', data })
+}
+
+export function transferFbsHandoverList(data) {
+  return request({ url: '/orders/fbs/handover-list/transfer', method: 'post', data })
+}
+
 export function exportOrders(data) {
   return request({ url: '/orders/export', method: 'post', data, responseType: 'blob' })
 }

@@ -12,11 +12,15 @@ class AliExpressService
 {
     protected string $baseUrl;
     protected bool $verifySsl;
+    protected OrderLogisticsService $orderLogisticsService;
+    protected AliExpressFbsMockService $fbsMockService;
 
     public function __construct()
     {
         $this->baseUrl = (string) config('services.aliexpress.base_url', 'https://openapi.aliexpress.ru');
         $this->verifySsl = (bool) config('services.aliexpress.verify_ssl', false);
+        $this->orderLogisticsService = new OrderLogisticsService();
+        $this->fbsMockService = new AliExpressFbsMockService();
     }
 
     /**
@@ -122,13 +126,25 @@ class AliExpressService
             $logisticOrderId = (int) $logisticOrders[0]['id'];
         }
 
+        $handoverListId = null;
+        if (!empty($logisticOrders) && !empty($logisticOrders[0]['handover_list_id'])) {
+            $handoverListId = (int) $logisticOrders[0]['handover_list_id'];
+        }
+
+        $handoverListStatus = !empty($logisticOrders) ? ($logisticOrders[0]['handover_list_status'] ?? null) : null;
+
         // 计算快递费(从pre_split_postings的delivery_fee)
         $shippingFee = 0;
         foreach ($preSplit as $posting) {
             $shippingFee += ($posting['delivery_fee'] ?? 0) / 100;
         }
 
-        $existingOrder = Order::where('ae_order_id', $aeOrderId)->first();
+        $existingOrder = Order::with('currentLogistics')->where('ae_order_id', $aeOrderId)->first();
+        $resolvedLogisticsType = $logisticsType !== '' ? $logisticsType : ($existingOrder ? (string) $existingOrder->logistics_type : '');
+        $resolvedTrackingNumber = $trackingNumber !== '' ? $trackingNumber : ($existingOrder ? (string) $existingOrder->tracking_number : '');
+        $resolvedLogisticOrderId = $logisticOrderId ?: ($existingOrder ? $existingOrder->logistic_order_id : null);
+        $resolvedHandoverListId = $handoverListId ?: ($existingOrder ? $existingOrder->handover_list_id : null);
+        $resolvedHandoverListStatus = $handoverListStatus ?? ($existingOrder ? $existingOrder->handover_list_status : null);
         $apiShipQianze = $this->parseDate(
             $data['actual_ship_at']
                 ?? $data['shipped_at']
@@ -161,9 +177,11 @@ class AliExpressService
                 'receiver_city' => $deliveryInfo['city'] ?? '',
                 'receiver_street' => $deliveryInfo['street_house'] ?? '',
                 'receiver_zip' => $deliveryInfo['index'] ?? '',
-                'logistics_type' => $logisticsType,
-                'tracking_number' => $trackingNumber,
-                'logistic_order_id' => $logisticOrderId,
+                'logistics_type' => $resolvedLogisticsType,
+                'tracking_number' => $resolvedTrackingNumber,
+                'logistic_order_id' => $resolvedLogisticOrderId,
+                'handover_list_id' => $resolvedHandoverListId,
+                'handover_list_status' => $resolvedHandoverListStatus,
                 'finish_reason' => $data['finish_reason'] ?? '',
                 'seller_comment' => $data['seller_comment'] ?? null,
                 'fully_prepared' => $data['fully_prepared'] ?? false,
@@ -184,6 +202,36 @@ class AliExpressService
                 'raw_data' => $data,
             ]
         );
+
+        $logisticsPayload = [
+            'payload' => [
+                'aliexpress' => [
+                    'logistic_orders' => $logisticOrders,
+                ],
+            ],
+        ];
+
+        if ($resolvedLogisticsType !== '') {
+            $logisticsPayload['logistics_mode'] = $resolvedLogisticsType;
+        }
+        if (strtoupper($resolvedLogisticsType) === 'FBS') {
+            $logisticsPayload['provider_code'] = 'aliexpress';
+            $logisticsPayload['provider_name'] = 'AliExpress';
+        }
+        if ($resolvedTrackingNumber !== '') {
+            $logisticsPayload['tracking_number'] = $resolvedTrackingNumber;
+        }
+        if ($resolvedLogisticOrderId) {
+            $logisticsPayload['platform_logistic_order_id'] = (int) $resolvedLogisticOrderId;
+        }
+        if ($resolvedHandoverListId) {
+            $logisticsPayload['handover_list_id'] = (int) $resolvedHandoverListId;
+        }
+        if ($resolvedHandoverListStatus !== null && $resolvedHandoverListStatus !== '') {
+            $logisticsPayload['handover_list_status'] = $resolvedHandoverListStatus;
+        }
+
+        $this->orderLogisticsService->syncPrimary($order, $logisticsPayload);
 
         // 同步订单行项
         $existingLineIds = [];
@@ -359,29 +407,541 @@ class AliExpressService
     }
 
     /**
+     * FBS 发货（支持 mock）
+     */
+    public function shipFbs(Shop $shop, Order $order, array $options = []): array
+    {
+        $forceMock = (bool) ($options['use_mock'] ?? false);
+        if ($this->isFbsMockEnabled($forceMock)) {
+            return $this->fbsMockService->ship($order, $options);
+        }
+
+        $createResult = null;
+        if (empty($order->logistic_order_id)) {
+            $createResult = $this->createFbsLogisticOrder($shop, $order, $options);
+            if (!$createResult['success']) {
+                return $createResult;
+            }
+            if (!empty($createResult['data']['logistic_order_id'])) {
+                $this->orderLogisticsService->syncPrimary($order, [
+                    'logistics_mode' => 'FBS',
+                    'provider_code' => 'aliexpress',
+                    'provider_name' => 'AliExpress',
+                    'platform_logistic_order_id' => (int) $createResult['data']['logistic_order_id'],
+                ]);
+            }
+        }
+
+        $fbsInfo = null;
+        if (!empty($order->logistic_order_id)) {
+            $fbsInfoResult = $this->getFbsLogisticOrderInfo($shop, (int) $order->logistic_order_id);
+            if ($fbsInfoResult['success']) {
+                $fbsInfo = $fbsInfoResult['data'];
+            }
+        }
+
+        return [
+            'success' => true,
+            'message' => 'FBS 发货单创建成功，运单号由平台分配',
+            'data' => [
+                'mock' => false,
+                'create_logistic_order' => $createResult['data'] ?? null,
+                'fbs_info' => $fbsInfo,
+                'tracking_number' => $fbsInfo['platform_tracking_code'] ?? null,
+            ],
+        ];
+    }
+
+    /**
+     * 创建 FBS 发货单
+     */
+    public function createFbsLogisticOrder(Shop $shop, Order $order, array $options = []): array
+    {
+        $length = (int) ($options['total_length'] ?? config('services.aliexpress.fbs_default_length', 20));
+        $width = (int) ($options['total_width'] ?? config('services.aliexpress.fbs_default_width', 10));
+        $height = (int) ($options['total_height'] ?? config('services.aliexpress.fbs_default_height', 5));
+        $weight = (float) ($options['total_weight'] ?? config('services.aliexpress.fbs_default_weight', 0.5));
+
+        $rawLines = is_array(($order->raw_data ?? [])['order_lines'] ?? null)
+            ? ($order->raw_data ?? [])['order_lines']
+            : [];
+
+        $sourceBySku = [];
+        foreach ($rawLines as $line) {
+            $skuId = (string) ($line['sku_id'] ?? '');
+            $productSourceId = $line['product_source_id'] ?? null;
+            if ($skuId !== '' && $productSourceId !== null) {
+                $sourceBySku[$skuId] = (int) $productSourceId;
+            }
+        }
+
+        $lines = $this->buildFbsLogisticLines($order, $options, $sourceBySku);
+
+        if (empty($lines)) {
+            return ['success' => false, 'message' => '无法创建发货单：订单行缺少 sku_id'];
+        }
+
+        if ($this->isFbsMockEnabled((bool) ($options['use_mock'] ?? false))) {
+            return $this->fbsMockService->createLogisticOrder($order, array_merge($options, [
+                'total_length' => max(1, $length),
+                'total_width' => max(1, $width),
+                'total_height' => max(1, $height),
+                'total_weight' => max(0.01, $weight),
+                'items' => $lines,
+            ]));
+        }
+
+        $token = $shop->access_token;
+        if (!$token) {
+            return ['success' => false, 'message' => '店铺未配置access_token'];
+        }
+
+        $body = [
+            'orders' => [[
+                'trade_order_id' => (int) $order->ae_order_id,
+                'total_length' => max(1, $length),
+                'total_width' => max(1, $width),
+                'total_height' => max(1, $height),
+                'total_weight' => max(0.01, $weight),
+                'undeliverable_option' => (string) ($options['undeliverable_option'] ?? 'Return'),
+                'danger_type' => (string) ($options['danger_type'] ?? 'General'),
+                'items' => $lines,
+            ]],
+        ];
+
+        try {
+            $response = Http::withHeaders([
+                'x-auth-token' => $token,
+                'x-request-locale' => 'en',
+                'Content-Type' => 'application/json',
+                'accept' => 'application/json',
+            ])
+                ->withOptions(['verify' => $this->verifySsl])
+                ->timeout(30)
+                ->post($this->baseUrl . '/seller-api/v1/logistic-order/create', $body);
+
+            $data = $response->json();
+            if (!$response->successful() || isset($data['error'])) {
+                $msg = $data['error']['message'] ?? ('创建FBS发货单失败: ' . $response->status());
+                Log::warning('AliExpress createFbsLogisticOrder failed', [
+                    'order_id' => $order->ae_order_id,
+                    'status' => $response->status(),
+                    'response' => $data,
+                ]);
+                return ['success' => false, 'message' => $msg, 'data' => $data];
+            }
+
+            $logisticOrderId = (int) (($data['data']['orders'][0]['logistic_orders'][0]['id'] ?? 0));
+
+            $this->orderLogisticsService->syncPrimary($order, [
+                'logistics_mode' => 'FBS',
+                'provider_code' => 'aliexpress',
+                'provider_name' => 'AliExpress',
+                'platform_logistic_order_id' => $logisticOrderId ?: null,
+                'payload' => [
+                    'fbs' => [
+                        'create_logistic_order' => $data['data']['orders'][0]['logistic_orders'][0] ?? null,
+                    ],
+                ],
+            ]);
+
+            return [
+                'success' => true,
+                'message' => 'FBS 发货单创建成功',
+                'data' => [
+                    'logistic_order_id' => $logisticOrderId,
+                    'trade_order_id' => (int) $order->ae_order_id,
+                    'orders' => $data['data']['orders'] ?? [],
+                    'raw' => $data,
+                ],
+            ];
+        } catch (\Throwable $e) {
+            Log::error('AliExpress createFbsLogisticOrder exception', [
+                'order_id' => $order->ae_order_id,
+                'message' => $e->getMessage(),
+            ]);
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    protected function isFbsMockEnabled(bool $forceMock = false): bool
+    {
+        return $forceMock || (bool) config('services.aliexpress.fbs_mock', false);
+    }
+
+    /**
+     * 创建并打印交接单（transfer sheet）
+     *
+     * 注意：AliExpress 不同区域接口字段可能不同，接口路径通过配置项注入。
+     */
+    public function createAndPrintTransferSheet(Shop $shop, array $logisticOrderIds): array
+    {
+        $createResult = $this->createFbsHandoverList($shop, $logisticOrderIds);
+        if (!$createResult['success']) {
+            return $createResult;
+        }
+
+        $handoverListId = (int) ($createResult['data']['handover_list_id'] ?? 0);
+        if ($handoverListId <= 0) {
+            return ['success' => false, 'message' => '创建交接单成功，但未返回交接单ID', 'data' => $createResult['data'] ?? null];
+        }
+
+        $printResult = $this->printFbsHandoverList($shop, $handoverListId);
+        if (!$printResult['success']) {
+            return [
+                'success' => true,
+                'message' => '交接单已创建，但打印链接获取失败: ' . ($printResult['message'] ?? '未知错误'),
+                'data' => array_merge($createResult['data'] ?? [], [
+                    'label_url' => null,
+                    'print_error' => $printResult['message'] ?? null,
+                ]),
+            ];
+        }
+
+        return [
+            'success' => true,
+            'message' => '交接单创建成功',
+            'data' => array_merge($createResult['data'] ?? [], [
+                'label_url' => $printResult['data']['label_url'] ?? null,
+                'print_raw' => $printResult['data']['raw'] ?? null,
+            ]),
+        ];
+    }
+
+    public function getFbsWorkflow(Shop $shop, Order $order): array
+    {
+        if ($this->isFbsMockEnabled()) {
+            return $this->fbsMockService->getWorkflow($order);
+        }
+
+        $logisticOrderId = $this->extractPrimaryLogisticOrderId($order);
+        $handoverListId = (int) ($order->handover_list_id ?: 0);
+
+        if ($logisticOrderId > 0 && (int) $order->logistic_order_id !== $logisticOrderId) {
+            $this->orderLogisticsService->syncPrimary($order, [
+                'logistics_mode' => 'FBS',
+                'provider_code' => 'aliexpress',
+                'provider_name' => 'AliExpress',
+                'platform_logistic_order_id' => $logisticOrderId,
+            ]);
+        }
+
+        $logisticOrder = null;
+        if ($logisticOrderId > 0) {
+            $logisticResult = $this->getFbsLogisticOrderInfo($shop, $logisticOrderId);
+            if (!$logisticResult['success']) {
+                return $logisticResult;
+            }
+            $logisticOrder = $logisticResult['data'];
+            $handoverListId = (int) ($logisticOrder['handover_list_id'] ?? $handoverListId);
+            $this->orderLogisticsService->syncPrimary($order, [
+                'logistics_mode' => 'FBS',
+                'provider_code' => 'aliexpress',
+                'provider_name' => 'AliExpress',
+                'platform_logistic_order_id' => $logisticOrderId > 0 ? $logisticOrderId : null,
+                'handover_list_id' => $handoverListId > 0 ? $handoverListId : null,
+                'tracking_number' => $logisticOrder['platform_tracking_code'] ?? $order->tracking_number,
+                'logistic_status' => $logisticOrder['status'] ?? null,
+                'payload' => [
+                    'fbs' => [
+                        'logistic_order' => $logisticOrder,
+                    ],
+                ],
+            ]);
+        }
+
+        $handoverList = null;
+        if ($handoverListId > 0) {
+            $handoverResult = $this->getFbsHandoverListInfo($shop, $handoverListId);
+            if (!$handoverResult['success']) {
+                return $handoverResult;
+            }
+            $handoverList = $handoverResult['data'];
+            $this->orderLogisticsService->syncPrimary($order, [
+                'logistics_mode' => 'FBS',
+                'provider_code' => 'aliexpress',
+                'provider_name' => 'AliExpress',
+                'handover_list_id' => $handoverListId,
+                'handover_list_status' => $handoverList['status'] ?? null,
+                'payload' => [
+                    'fbs' => [
+                        'handover_list' => $handoverList,
+                    ],
+                ],
+            ]);
+        }
+
+        return [
+            'success' => true,
+            'message' => 'ok',
+            'data' => [
+                'order_id' => $order->id,
+                'trade_order_id' => (int) $order->ae_order_id,
+                'logistic_order_id' => $logisticOrderId > 0 ? $logisticOrderId : null,
+                'handover_list_id' => $handoverListId > 0 ? $handoverListId : null,
+                'tracking_number' => $order->tracking_number,
+                'logistic_order' => $logisticOrder,
+                'handover_list' => $handoverList,
+            ],
+        ];
+    }
+
+    public function createFbsHandoverList(Shop $shop, array $logisticOrderIds, ?string $arrivalDate = null): array
+    {
+        $ids = collect($logisticOrderIds)
+            ->map(fn($id) => (int) $id)
+            ->filter(fn($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->toArray();
+
+        if (empty($ids)) {
+            return ['success' => false, 'message' => '缺少 logistic_order_id，无法创建交接单'];
+        }
+
+        if ($this->isFbsMockEnabled()) {
+            $order = $this->findOrderByFbsLogisticOrderIds($ids);
+            if (!$order) {
+                return ['success' => false, 'message' => '未找到对应订单，无法创建交接清单'];
+            }
+
+            return $this->fbsMockService->createHandoverList($order, $ids, $arrivalDate);
+        }
+
+        $payload = ['logistic_order_ids' => $ids];
+        if (!empty($arrivalDate)) {
+            $payload['arrival_date'] = $arrivalDate;
+        }
+
+        $result = $this->requestSellerApi($shop, '/seller-api/v1/handover-list/create', $payload, '创建交接清单失败', [
+            'logistic_order_ids' => $ids,
+        ]);
+
+        if (!$result['success']) {
+            return $result;
+        }
+
+        return [
+            'success' => true,
+            'message' => '交接清单创建成功',
+            'data' => [
+                'handover_list_id' => $result['data']['handover_list_id'] ?? null,
+                'arrival_date' => $payload['arrival_date'] ?? null,
+                'raw' => $result['raw'] ?? null,
+            ],
+        ];
+    }
+
+    public function getFbsHandoverListInfo(Shop $shop, int $handoverListId): array
+    {
+        if ($handoverListId <= 0) {
+            return ['success' => false, 'message' => '缺少 handover_list_id'];
+        }
+
+        if ($this->isFbsMockEnabled()) {
+            $order = $this->findOrderByHandoverListId($handoverListId);
+            if (!$order) {
+                return ['success' => false, 'message' => '未查询到交接清单信息'];
+            }
+
+            return $this->fbsMockService->getHandoverListInfo($order, $handoverListId);
+        }
+
+        $result = $this->requestSellerApi($shop, '/seller-api/v1/handover-list/get-by-filter', [
+            'handover_list_ids' => $handoverListId,
+            'page_size' => 1,
+            'page_number' => 1,
+        ], '查询交接清单失败', [
+            'handover_list_id' => $handoverListId,
+        ]);
+
+        if (!$result['success']) {
+            return $result;
+        }
+
+        $handoverList = $result['data']['data_source'][0] ?? null;
+        if (!$handoverList) {
+            return ['success' => false, 'message' => '未查询到交接清单信息', 'data' => $result['data'] ?? null];
+        }
+
+        return ['success' => true, 'message' => 'ok', 'data' => $handoverList, 'raw' => $result['raw'] ?? null];
+    }
+
+    public function addFbsLogisticOrdersToHandoverList(Shop $shop, int $handoverListId, array $logisticOrderIds): array
+    {
+        if ($this->isFbsMockEnabled()) {
+            $order = $this->findOrderByFbsLogisticOrderIds($logisticOrderIds) ?: $this->findOrderByHandoverListId($handoverListId);
+            if (!$order) {
+                return ['success' => false, 'message' => '未找到对应订单，无法添加到交接清单'];
+            }
+
+            return $this->fbsMockService->addLogisticOrdersToHandoverList($order, $handoverListId, $logisticOrderIds);
+        }
+
+        return $this->requestSellerApi($shop, '/seller-api/v1/handover-list/add-logistic-orders', [
+            'handover_list_id' => $handoverListId,
+            'order_ids' => array_values(array_unique(array_map('intval', $logisticOrderIds))),
+        ], '添加发货单到交接清单失败', [
+            'handover_list_id' => $handoverListId,
+            'logistic_order_ids' => $logisticOrderIds,
+        ]);
+    }
+
+    public function removeFbsLogisticOrdersFromHandoverList(Shop $shop, int $handoverListId, array $logisticOrderIds): array
+    {
+        if ($this->isFbsMockEnabled()) {
+            $order = $this->findOrderByHandoverListId($handoverListId) ?: $this->findOrderByFbsLogisticOrderIds($logisticOrderIds);
+            if (!$order) {
+                return ['success' => false, 'message' => '未找到对应订单，无法从交接清单移除'];
+            }
+
+            return $this->fbsMockService->removeLogisticOrdersFromHandoverList($order, $handoverListId, $logisticOrderIds);
+        }
+
+        return $this->requestSellerApi($shop, '/seller-api/v1/handover-list/remove-logistic-orders', [
+            'handover_list_id' => $handoverListId,
+            'order_ids' => array_values(array_unique(array_map('intval', $logisticOrderIds))),
+        ], '从交接清单移除发货单失败', [
+            'handover_list_id' => $handoverListId,
+            'logistic_order_ids' => $logisticOrderIds,
+        ]);
+    }
+
+    public function printFbsHandoverList(Shop $shop, int $handoverListId): array
+    {
+        if ($handoverListId <= 0) {
+            return ['success' => false, 'message' => '缺少 handover_list_id'];
+        }
+
+        if ($this->isFbsMockEnabled()) {
+            $order = $this->findOrderByHandoverListId($handoverListId);
+            if (!$order) {
+                return ['success' => false, 'message' => '未查询到交接清单信息'];
+            }
+
+            return $this->fbsMockService->printHandoverList($order, $handoverListId);
+        }
+
+        $result = $this->requestSellerApi($shop, '/seller-api/v1/labels/handover-lists/get', [
+            'handover_list_id' => $handoverListId,
+        ], '打印交接清单失败', [
+            'handover_list_id' => $handoverListId,
+        ]);
+
+        if (!$result['success']) {
+            return $result;
+        }
+
+        return [
+            'success' => true,
+            'message' => '交接清单标签获取成功',
+            'data' => [
+                'label_url' => $result['data']['label_url'] ?? null,
+                'raw' => $result['raw'] ?? null,
+            ],
+        ];
+    }
+
+    public function readyFbsHandoverForPickup(Shop $shop, int $handoverListId): array
+    {
+        if ($handoverListId <= 0) {
+            return ['success' => false, 'message' => '缺少 handover_list_id'];
+        }
+
+        if ($this->isFbsMockEnabled()) {
+            $order = $this->findOrderByHandoverListId($handoverListId);
+            if (!$order) {
+                return ['success' => false, 'message' => '未查询到交接清单信息'];
+            }
+
+            return $this->fbsMockService->readyForPickup($order, $handoverListId);
+        }
+
+        return $this->requestSellerApi($shop, '/seller-api/v1/handover-list/ready-for-pickup', [
+            'handover_list_id' => $handoverListId,
+        ], '交接清单标记待揽收失败', [
+            'handover_list_id' => $handoverListId,
+        ]);
+    }
+
+    public function transferFbsHandoverList(Shop $shop, int $handoverListId): array
+    {
+        if ($handoverListId <= 0) {
+            return ['success' => false, 'message' => '缺少 handover_list_id'];
+        }
+
+        if ($this->isFbsMockEnabled()) {
+            $order = $this->findOrderByHandoverListId($handoverListId);
+            if (!$order) {
+                return ['success' => false, 'message' => '未查询到交接清单信息'];
+            }
+
+            return $this->fbsMockService->transferHandoverList($order, $handoverListId);
+        }
+
+        return $this->requestSellerApi($shop, '/seller-api/v1/handover-list/transfer', [
+            'handover_list_id' => $handoverListId,
+        ], '关闭交接清单失败', [
+            'handover_list_id' => $handoverListId,
+        ]);
+    }
+
+    /**
+     * 查询单个 FBS 发货单信息
+     */
+    public function getFbsLogisticOrderInfo(Shop $shop, int $logisticOrderId): array
+    {
+        if ($this->isFbsMockEnabled()) {
+            $order = $this->findOrderByPlatformLogisticOrderId($logisticOrderId);
+            if (!$order) {
+                return ['success' => false, 'message' => '未查询到发货单信息'];
+            }
+
+            return $this->fbsMockService->getLogisticOrderInfo($order, $logisticOrderId);
+        }
+
+        $token = $shop->access_token;
+        if (!$token) {
+            return ['success' => false, 'message' => '店铺未配置access_token'];
+        }
+
+        $result = $this->requestSellerApi($shop, '/seller-api/v1/logistic-order/get', [
+            'logistic_order_ids' => [$logisticOrderId],
+            'page_size' => 1,
+            'page' => 1,
+            'logistic_order_info' => 'All',
+        ], '查询发货单失败', [
+            'logistic_order_id' => $logisticOrderId,
+        ]);
+
+        if (!$result['success']) {
+            return $result;
+        }
+
+        $info = $result['data']['logistic_orders'][0] ?? null;
+        if (!$info) {
+            return ['success' => false, 'message' => '未查询到发货单信息', 'data' => $result['data'] ?? null];
+        }
+
+        return ['success' => true, 'message' => 'ok', 'data' => $info, 'raw' => $result['raw'] ?? null];
+    }
+
+    /**
      * 获取面单标签（返回 PDF URL 或 base64）
      */
     public function getShippingLabel(Shop $shop, Order $order): array
     {
+        if ($this->isFbsMockEnabled()) {
+            return $this->fbsMockService->getShippingLabel($order);
+        }
+
         $token = $shop->access_token;
         if (!$token) {
             return ['success' => false, 'message' => '店铺未配置access_token'];
         }
 
         $rawData = $order->raw_data ?? [];
-        // 只认原始数据里的 raw_data.logistic_orders[*].id
-        $logisticOrders = is_array($rawData['logistic_orders'] ?? null) ? $rawData['logistic_orders'] : [];
-        $logisticOrderIds = collect($logisticOrders)
-            ->map(function ($item) {
-                if (!is_array($item) || !array_key_exists('id', $item)) {
-                    return null;
-                }
-                return (int) $item['id'];
-            })
-            ->filter(fn($id) => $id > 0)
-            ->unique()
-            ->values()
-            ->toArray();
+        $logisticOrderIds = $this->extractFbsLogisticOrderIds($order);
 
         if (empty($logisticOrderIds)) {
             return ['success' => false, 'message' => '未找到logistic_order_id，请先创建货件并同步订单后再打印'];
@@ -393,33 +953,25 @@ class AliExpressService
         ]);
 
         try {
-            $response = Http::withHeaders([
-                'accept' => 'application/json',
-                'x-auth-token' => $token,
-                'x-request-locale' => 'en',
-                'Content-Type' => 'application/json',
-            ])
-                ->withOptions(['verify' => $this->verifySsl])
-                ->timeout(30)
-                ->post($this->baseUrl . '/seller-api/v1/labels/orders/get', [
-                    'logistic_order_ids' => $logisticOrderIds,
-                ]);
+            $result = $this->requestSellerApi($shop, '/seller-api/v1/labels/orders/get', [
+                'logistic_order_ids' => $logisticOrderIds,
+            ], '面单请求失败', [
+                'order_id' => $order->ae_order_id,
+                'logistic_order_ids' => $logisticOrderIds,
+            ]);
 
-            $data = $response->json();
-            $labelUrl = $data['data']['label_url'] ?? null;
-
-            if ($response->successful() && $labelUrl) {
+            if ($result['success'] && !empty($result['data']['label_url'])) {
                 return [
                     'success' => true,
                     'message' => '面单获取成功',
-                    'label_url' => $labelUrl,
+                    'label_url' => $result['data']['label_url'],
                     'used_ids' => $logisticOrderIds,
-                    'raw' => $data['data'] ?? [],
+                    'raw' => $result['data'] ?? [],
                 ];
             }
 
-            $errorCode = $data['error']['code'] ?? null;
-            $errorMessage = $data['error']['message'] ?? ($data['message'] ?? ('面单请求失败: ' . $response->status()));
+            $errorCode = $result['error_code'] ?? null;
+            $errorMessage = $result['message'] ?? '面单请求失败';
             $finalMessage = $errorCode ? ($errorCode . ': ' . $errorMessage) : $errorMessage;
 
             if ($errorCode === 'LogisticProviderNotFound') {
@@ -434,7 +986,7 @@ class AliExpressService
             Log::warning('AliExpress getLabel failed', [
                 'order_id' => $order->ae_order_id,
                 'logistic_order_ids' => $logisticOrderIds,
-                'response' => $data,
+                'response' => $result['raw'] ?? $result['data'] ?? null,
             ]);
 
             return [
@@ -442,7 +994,7 @@ class AliExpressService
                 'message' => $finalMessage,
                 'used_ids' => $logisticOrderIds,
                 'error_code' => $errorCode,
-                'error_details' => $data['error']['details'] ?? null,
+                'error_details' => $result['error_details'] ?? null,
             ];
         } catch (\Exception $e) {
             Log::error('AliExpress getLabel exception', [
@@ -450,6 +1002,181 @@ class AliExpressService
                 'logistic_order_ids' => $logisticOrderIds,
                 'message' => $e->getMessage(),
             ]);
+
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    protected function buildFbsLogisticLines(Order $order, array $options, array $sourceBySku): array
+    {
+        $manualItems = is_array($options['items'] ?? null) ? $options['items'] : [];
+        if (!empty($manualItems)) {
+            return collect($manualItems)
+                ->map(function ($item) {
+                    if (!is_array($item)) {
+                        return null;
+                    }
+
+                    $skuId = (int) ($item['sku_id'] ?? 0);
+                    $quantity = (int) ($item['quantity'] ?? 0);
+                    if ($skuId <= 0 || $quantity <= 0) {
+                        return null;
+                    }
+
+                    $line = [
+                        'quantity' => $quantity,
+                        'sku_id' => $skuId,
+                    ];
+
+                    if (array_key_exists('product_source_id', $item) && $item['product_source_id'] !== '' && $item['product_source_id'] !== null) {
+                        $line['product_source_id'] = (int) $item['product_source_id'];
+                    }
+
+                    return $line;
+                })
+                ->filter()
+                ->values()
+                ->toArray();
+        }
+
+        $lines = [];
+        $items = $order->relationLoaded('items') ? $order->items : $order->items()->get();
+        foreach ($items as $item) {
+            if (empty($item->ae_sku_id)) {
+                continue;
+            }
+            $skuId = (int) $item->ae_sku_id;
+            $line = [
+                'quantity' => (int) ($item->quantity ?: 1),
+                'sku_id' => $skuId,
+            ];
+            $sourceKey = (string) $item->ae_sku_id;
+            if (isset($sourceBySku[$sourceKey])) {
+                $line['product_source_id'] = $sourceBySku[$sourceKey];
+            }
+            $lines[] = $line;
+        }
+
+        return $lines;
+    }
+
+    protected function extractPrimaryLogisticOrderId(Order $order): int
+    {
+        $ids = $this->extractFbsLogisticOrderIds($order);
+        return !empty($ids) ? (int) $ids[0] : 0;
+    }
+
+    protected function extractFbsLogisticOrderIds(Order $order): array
+    {
+        $ids = [];
+        if (!empty($order->logistic_order_id)) {
+            $ids[] = (int) $order->logistic_order_id;
+        }
+
+        $rawData = $order->raw_data ?? [];
+        $logisticOrders = is_array($rawData['logistic_orders'] ?? null) ? $rawData['logistic_orders'] : [];
+        foreach ($logisticOrders as $item) {
+            if (!is_array($item) || !array_key_exists('id', $item)) {
+                continue;
+            }
+            $ids[] = (int) $item['id'];
+        }
+
+        return collect($ids)
+            ->filter(fn($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->toArray();
+    }
+
+    protected function findOrderByPlatformLogisticOrderId(int $logisticOrderId): ?Order
+    {
+        if ($logisticOrderId <= 0) {
+            return null;
+        }
+
+        return Order::with(['shop', 'items', 'currentLogistics'])
+            ->whereHas('currentLogistics', function ($query) use ($logisticOrderId) {
+                $query->where('platform_logistic_order_id', $logisticOrderId);
+            })
+            ->first();
+    }
+
+    protected function findOrderByFbsLogisticOrderIds(array $logisticOrderIds): ?Order
+    {
+        $ids = array_values(array_filter(array_map('intval', $logisticOrderIds), fn($id) => $id > 0));
+        if (empty($ids)) {
+            return null;
+        }
+
+        return Order::with(['shop', 'items', 'currentLogistics'])
+            ->whereHas('currentLogistics', function ($query) use ($ids) {
+                $query->whereIn('platform_logistic_order_id', $ids);
+            })
+            ->first();
+    }
+
+    protected function findOrderByHandoverListId(int $handoverListId): ?Order
+    {
+        if ($handoverListId <= 0) {
+            return null;
+        }
+
+        return Order::with(['shop', 'items', 'currentLogistics'])
+            ->whereHas('currentLogistics', function ($query) use ($handoverListId) {
+                $query->where('handover_list_id', $handoverListId);
+            })
+            ->first();
+    }
+
+    protected function requestSellerApi(Shop $shop, string $path, array $body, string $defaultErrorMessage, array $logContext = []): array
+    {
+        $token = $shop->access_token;
+        if (!$token) {
+            return ['success' => false, 'message' => '店铺未配置access_token'];
+        }
+
+        try {
+            $response = Http::withHeaders([
+                'accept' => 'application/json',
+                'x-auth-token' => $token,
+                'x-request-locale' => 'en',
+                'Content-Type' => 'application/json',
+            ])
+                ->withOptions(['verify' => $this->verifySsl])
+                ->timeout(30)
+                ->post($this->baseUrl . $path, $body);
+
+            $data = $response->json();
+            if (!$response->successful() || isset($data['error'])) {
+                $message = $data['error']['message'] ?? $data['message'] ?? ($defaultErrorMessage . ': ' . $response->status());
+                Log::warning('AliExpress seller api failed', array_merge($logContext, [
+                    'path' => $path,
+                    'status' => $response->status(),
+                    'response' => $data,
+                ]));
+
+                return [
+                    'success' => false,
+                    'message' => $message,
+                    'data' => $data['data'] ?? null,
+                    'raw' => $data,
+                    'error_code' => $data['error']['code'] ?? null,
+                    'error_details' => $data['error']['details'] ?? null,
+                ];
+            }
+
+            return [
+                'success' => true,
+                'message' => 'ok',
+                'data' => $data['data'] ?? [],
+                'raw' => $data,
+            ];
+        } catch (\Throwable $e) {
+            Log::error('AliExpress seller api exception', array_merge($logContext, [
+                'path' => $path,
+                'message' => $e->getMessage(),
+            ]));
 
             return ['success' => false, 'message' => $e->getMessage()];
         }

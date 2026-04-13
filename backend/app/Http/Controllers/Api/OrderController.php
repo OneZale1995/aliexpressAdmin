@@ -3,14 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\RunOrderSyncTask;
 use App\Models\DictType;
 use App\Models\Order;
 use App\Models\OrderSyncTask;
 use App\Models\Shop;
 use App\Models\Team;
-use App\Services\AliExpressService;
-use App\Services\ChinaPostService;
-use App\Services\Sz56tService;
+use App\Services\OrderLogisticsService;
 use App\Traits\ApiResponse;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -44,7 +43,7 @@ class OrderController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $query = Order::with(['items', 'shop:id,name,email']);
+        $query = Order::with(['items', 'shop:id,name,email', 'currentLogistics']);
 
         $this->applyOrderPermissionScope($query, $user);
 
@@ -56,7 +55,7 @@ class OrderController extends Controller
             $query->where('ae_order_id', $request->ae_order_id);
         }
         if ($request->filled('tracking_number')) {
-            $query->where('tracking_number', 'like', '%' . $request->tracking_number . '%');
+            $this->applyTrackingNumberFilter($query, $request->tracking_number);
         }
         if ($request->filled('receiver_name')) {
             $query->where('receiver_name', 'like', '%' . $request->receiver_name . '%');
@@ -440,7 +439,18 @@ class OrderController extends Controller
             'message' => '任务已创建，等待执行',
         ]);
 
-        $this->launchSyncProcess($task->id);
+        try {
+            RunOrderSyncTask::dispatchAfterResponse($task->id);
+        } catch (\Throwable $e) {
+            $task->update([
+                'status' => 'failed',
+                'progress' => 100,
+                'message' => '同步任务启动失败: ' . $e->getMessage(),
+                'finished_at' => now(),
+            ]);
+
+            return $this->error('同步任务启动失败: ' . $e->getMessage());
+        }
 
         return $this->success([
             'task_id' => $task->id,
@@ -501,7 +511,7 @@ class OrderController extends Controller
             'purchase_amount' => 'nullable|numeric|min:0',
             'express_fee' => 'nullable|numeric|min:0',
             'logistics_fee' => 'nullable|numeric|min:0',
-            'logistics_template' => 'nullable|in:online,offline_leiyi,offline_epacket',
+            'logistics_template' => 'nullable|string|max:50',
             'eub_amazon_ratio' => 'nullable|numeric|min:0|max:999.99',
             'eub_base_fee' => 'nullable|numeric|min:0',
             'calculated_logistics_fee' => 'nullable|numeric|min:0',
@@ -510,7 +520,7 @@ class OrderController extends Controller
             'ship_qianze_at' => 'nullable|date',
         ]);
 
-        $order = Order::findOrFail($request->id);
+        $order = Order::with('currentLogistics')->findOrFail($request->id);
 
         $payload = [
             'seller_comment' => $request->input('seller_comment', $order->seller_comment),
@@ -524,7 +534,6 @@ class OrderController extends Controller
             'purchase_amount' => $request->input('purchase_amount', $order->purchase_amount),
             'express_fee' => $request->input('express_fee', $order->express_fee),
             'logistics_fee' => $request->input('logistics_fee', $order->logistics_fee),
-            'logistics_template' => $request->input('logistics_template', $order->logistics_template ?: 'online'),
             'eub_amazon_ratio' => $request->input('eub_amazon_ratio', $order->eub_amazon_ratio ?? 0),
             'eub_base_fee' => $request->input('eub_base_fee', $order->eub_base_fee ?? 0),
             'calculated_logistics_fee' => $request->input('calculated_logistics_fee', $order->calculated_logistics_fee ?? 0),
@@ -534,6 +543,19 @@ class OrderController extends Controller
         ];
 
         $order->update($payload);
+
+        if ($request->has('logistics_template')) {
+            $logisticsService = new OrderLogisticsService();
+            $templateCode = $request->input('logistics_template', $order->logistics_template ?: 'online');
+            $logisticsService->syncPrimary($order, [
+                'logistics_mode' => $order->logistics_type,
+                'template_code' => $templateCode,
+                'provider_code' => $logisticsService->resolveProviderCodeByTemplate($templateCode) ?: data_get($order, 'currentLogistics.provider_code'),
+                'provider_name' => data_get($order, 'currentLogistics.provider_name'),
+            ]);
+        }
+
+        $order->load('currentLogistics');
 
         return $this->success($order, '订单后台信息更新成功');
     }
@@ -562,343 +584,12 @@ class OrderController extends Controller
     }
 
     /**
-     * 提交发货（调用速卖通 mark-ship API，同时记录本地）
-     * FBS: 直接调用 AliExpress mark-ship
-     * DBS: 先创建第三方物流单(雷翼/邮政) → 再调用 AliExpress offline-ship 更新状态
-     */
-    public function ship(Request $request)
-    {
-        $request->validate([
-            'id'              => 'required|exists:orders,id',
-            'track_number'    => 'required|string|max:100',
-            'logistic_method' => 'nullable|string|max:100',
-            'ship_provider'   => 'nullable|in:aliexpress,chinapost,leiyi',
-            'provider_name'   => 'nullable|string|max:100',
-        ]);
-
-        $order = Order::with('shop')->findOrFail($request->id);
-
-        if (!$order->shop) {
-            return $this->error('订单关联店铺不存在');
-        }
-
-        $aeService = new AliExpressService();
-        $isDBS = strtoupper($order->logistics_type ?? '') === 'DBS';
-
-        if ($isDBS) {
-            // DBS: 调用 AliExpress offline-ship/to-in-transit
-            $providerName = $request->input('provider_name', 'China Post');
-            $result = $aeService->offlineShipToInTransit(
-                $order->shop,
-                $order,
-                $request->track_number,
-                $providerName
-            );
-        } else {
-            // FBS: 调用 AliExpress mark-ship
-            $result = $aeService->markShip(
-                $order->shop,
-                $order,
-                $request->track_number,
-                $request->input('logistic_method', '')
-            );
-        }
-
-        // 无论接口成功与否，本地都记录发货信息
-        $order->update([
-            'tracking_number' => $request->track_number,
-            'actual_ship_at'  => now(),
-            'marked_ship_at'  => $order->marked_ship_at ?? now(),
-        ]);
-
-        if ($result['success']) {
-            return $this->success([
-                'ae_result' => $result['data'],
-                'tracking_number' => $request->track_number,
-                'mode' => $isDBS ? 'DBS_offline' : 'FBS_online',
-            ], '发货成功');
-        }
-
-        // API 失败但本地已记录
-        return $this->success([
-            'ae_result' => $result['data'] ?? null,
-            'tracking_number' => $request->track_number,
-            'ae_error' => $result['message'],
-            'mode' => $isDBS ? 'DBS_offline' : 'FBS_online',
-        ], '本地已记录发货，速卖通接口返回: ' . $result['message']);
-    }
-
-    /**
-     * DBS: 通过中国邮政创建物流订单并获取运单号
-     */
-    public function chinaPostCreateOrder(Request $request)
-    {
-        $request->validate([
-            'id' => 'required|exists:orders,id',
-            'biz_product_no' => 'nullable|string|max:10',
-            'weight' => 'nullable|integer|min:1',
-        ]);
-
-        $order = Order::with(['shop', 'items'])->findOrFail($request->id);
-
-        $service = new ChinaPostService();
-        $result = $service->createOrder($order, [
-            'biz_product_no' => $request->input('biz_product_no', '001'),
-            'weight' => $request->input('weight'),
-        ]);
-
-        if ($result['success']) {
-            $waybillNo = $result['waybill_no'];
-            $order->update([
-                'tracking_number' => $waybillNo,
-                'logistics_template' => 'offline_epacket',
-            ]);
-
-            return $this->success([
-                'waybill_no' => $waybillNo,
-                'raw' => $result['raw'] ?? null,
-            ], '邮政下单成功，运单号: ' . $waybillNo);
-        }
-
-        return $this->error($result['message'], 40000, [
-            'error_code' => $result['error_code'] ?? null,
-            'raw' => $result['raw'] ?? null,
-        ]);
-    }
-
-    /**
-     * DBS: 获取中国邮政面单 PDF
-     */
-    public function chinaPostLabel(Request $request)
-    {
-        $request->validate([
-            'id' => 'required|exists:orders,id',
-            'page_type' => 'nullable|in:RM,A4',
-        ]);
-
-        $order = Order::findOrFail($request->id);
-
-        if (empty($order->tracking_number)) {
-            return $this->error('该订单暂无运单号，请先创建邮政订单');
-        }
-
-        $service = new ChinaPostService();
-        $result = $service->getLabel(
-            $order->tracking_number,
-            $request->input('page_type', 'RM')
-        );
-
-        if ($result['success']) {
-            // 返回 base64 编码的 PDF
-            return $this->success([
-                'pdf_base64' => base64_encode($result['pdf_content']),
-                'waybill_no' => $result['waybill_no'],
-            ], '邮政面单获取成功');
-        }
-
-        return $this->error($result['message'], 40000, [
-            'error_code' => $result['error_code'] ?? null,
-        ]);
-    }
-
-    /**
-     * DBS: 中国邮政撤单
-     */
-    public function chinaPostCancel(Request $request)
-    {
-        $request->validate([
-            'id' => 'required|exists:orders,id',
-        ]);
-
-        $order = Order::findOrFail($request->id);
-
-        if (empty($order->tracking_number)) {
-            return $this->error('该订单暂无运单号');
-        }
-
-        $service = new ChinaPostService();
-        $result = $service->cancelOrder($order->tracking_number);
-
-        if ($result['success']) {
-            return $this->success(null, $result['message']);
-        }
-
-        return $this->error($result['message']);
-    }
-
-    /**
-     * DBS: 通过雷翼/sz56t创建物流订单
-     */
-    public function sz56tCreateOrder(Request $request)
-    {
-        $request->validate([
-            'id' => 'required|exists:orders,id',
-            'product_id' => 'nullable|string|max:50',
-            'weight' => 'nullable|integer|min:1',
-        ]);
-
-        $order = Order::with(['shop', 'items'])->findOrFail($request->id);
-
-        $service = new Sz56tService();
-        $result = $service->createOrder($order, [
-            'product_id' => $request->input('product_id'),
-            'weight' => $request->input('weight'),
-        ]);
-
-        if ($result['success']) {
-            $updateData = [
-                'sz56t_order_id' => $result['order_id'],
-                'logistics_template' => 'offline_leiyi',
-            ];
-
-            if (!empty($result['tracking_number'])) {
-                $updateData['tracking_number'] = $result['tracking_number'];
-            }
-
-            $order->update($updateData);
-
-            return $this->success([
-                'order_id' => $result['order_id'],
-                'tracking_number' => $result['tracking_number'],
-                'is_delay' => $result['is_delay'],
-                'is_remote' => $result['is_remote'],
-                'reference_number' => $result['reference_number'] ?? '',
-            ], $result['message']);
-        }
-
-        return $this->error($result['message'], 40000, [
-            'raw' => $result['raw'] ?? null,
-        ]);
-    }
-
-    /**
-     * DBS: 获取雷翼面单打印URL
-     */
-    public function sz56tLabel(Request $request)
-    {
-        $request->validate([
-            'id' => 'required|exists:orders,id',
-            'print_type' => 'nullable|string|max:30',
-        ]);
-
-        $order = Order::findOrFail($request->id);
-
-        if (empty($order->sz56t_order_id)) {
-            return $this->error('该订单暂无雷翼订单号，请先创建雷翼订单');
-        }
-
-        $service = new Sz56tService();
-        $printType = $request->input('print_type', 'lab10_10');
-        $labelUrl = $service->getLabelUrl($order->sz56t_order_id, $printType);
-
-        return $this->success([
-            'label_url' => $labelUrl,
-            'sz56t_order_id' => $order->sz56t_order_id,
-        ], '面单URL获取成功');
-    }
-
-    /**
-     * DBS: 雷翼交寄预报（标记发货）
-     */
-    public function sz56tMarkShipped(Request $request)
-    {
-        $request->validate([
-            'id' => 'required|exists:orders,id',
-        ]);
-
-        $order = Order::findOrFail($request->id);
-
-        $invoiceCode = $order->ae_order_id;
-        $service = new Sz56tService();
-        $result = $service->markShipped($invoiceCode);
-
-        if ($result['success']) {
-            return $this->success($result['data'], '交寄预报成功');
-        }
-
-        return $this->error($result['message']);
-    }
-
-    /**
-     * DBS: 获取雷翼跟踪号（延迟获取）
-     */
-    public function sz56tGetTrackingNumber(Request $request)
-    {
-        $request->validate([
-            'id' => 'required|exists:orders,id',
-        ]);
-
-        $order = Order::findOrFail($request->id);
-
-        $service = new Sz56tService();
-        $result = $service->getTrackingNumber($order->ae_order_id);
-
-        if ($result['success'] && !empty($result['tracking_number'])) {
-            $order->update(['tracking_number' => $result['tracking_number']]);
-
-            return $this->success([
-                'tracking_number' => $result['tracking_number'],
-            ], '跟踪号获取成功');
-        }
-
-        return $this->error($result['message'] ?? '跟踪号暂未生成，请稍后再试');
-    }
-
-    /**
-     * 获取发货面单（PDF URL）
-     */
-    public function printLabel(Request $request)
-    {
-        $request->validate([
-            'id' => 'required|exists:orders,id',
-        ]);
-
-        $order = Order::with('shop')->findOrFail($request->id);
-
-        if (!$order->shop) {
-            return $this->error('订单关联店铺不存在');
-        }
-
-        if (empty($order->logistic_order_id)) {
-            $rawData = $order->raw_data ?? [];
-            $logisticOrders = is_array($rawData['logistic_orders'] ?? null) ? $rawData['logistic_orders'] : [];
-            $fallbackId = (!empty($logisticOrders) && !empty($logisticOrders[0]['id'])) ? (int) $logisticOrders[0]['id'] : null;
-            if ($fallbackId) {
-                $order->update(['logistic_order_id' => $fallbackId]);
-                $order->refresh();
-            }
-        }
-
-        if (empty($order->logistic_order_id)) {
-            return $this->error('该订单暂无 logistic_order_id，暂不可打印面单');
-        }
-
-        $service = new AliExpressService();
-        $result = $service->getShippingLabel($order->shop, $order);
-
-        if ($result['success']) {
-            return $this->success([
-                'label_url'   => $result['label_url'],
-                'used_ids'    => $result['used_ids'] ?? [],
-                'pdf_content' => $result['pdf_content'] ?? null,
-                'raw'         => $result['raw'] ?? [],
-            ], '面单获取成功');
-        }
-
-        return $this->error($result['message'] ?? '面单获取失败', 40000, [
-            'used_ids' => $result['used_ids'] ?? [],
-            'error_code' => $result['error_code'] ?? null,
-            'error_details' => $result['error_details'] ?? null,
-        ]);
-    }
-
-    /**
      * 导出订单（CSV）
      */
     public function export(Request $request)
     {
         $user = $request->user();
-        $query = Order::with(['shop:id,name,email']);
+        $query = Order::with(['shop:id,name,email', 'currentLogistics']);
 
         if ($user->hasRole('super-admin')) {
             // no-op
@@ -927,7 +618,7 @@ class OrderController extends Controller
             $query->where('ae_order_id', $request->ae_order_id);
         }
         if ($request->filled('tracking_number')) {
-            $query->where('tracking_number', 'like', '%' . $request->tracking_number . '%');
+            $this->applyTrackingNumberFilter($query, $request->tracking_number);
         }
 
         $rows = $query->orderByDesc('id')->limit(10000)->get();
@@ -975,6 +666,18 @@ class OrderController extends Controller
         return $user->hasRole('team-admin');
     }
 
+    private function applyTrackingNumberFilter($query, string $trackingNumber): void
+    {
+        $keyword = '%' . $trackingNumber . '%';
+
+        $query->where(function ($subQuery) use ($keyword) {
+            $subQuery->where('tracking_number', 'like', $keyword)
+                ->orWhereHas('currentLogistics', function ($logisticsQuery) use ($keyword) {
+                    $logisticsQuery->where('tracking_number', 'like', $keyword);
+                });
+        });
+    }
+
     private function getSyncableShops($user, $shopId = null)
     {
         if ($shopId) {
@@ -1002,18 +705,4 @@ class OrderController extends Controller
             ->get();
     }
 
-    private function launchSyncProcess(int $taskId): void
-    {
-        $php = PHP_BINARY;
-        $artisan = base_path('artisan');
-        $command = '"' . $php . '" "' . $artisan . '" order:sync-task ' . $taskId;
-
-        if (strncasecmp(PHP_OS_FAMILY, 'Windows', 7) === 0) {
-            // Windows 下后台启动
-            pclose(popen('start "" /B ' . $command . ' > NUL 2>&1', 'r'));
-            return;
-        }
-
-        exec($command . ' > /dev/null 2>&1 &');
-    }
 }

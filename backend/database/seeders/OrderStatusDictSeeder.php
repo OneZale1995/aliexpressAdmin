@@ -117,6 +117,40 @@ class OrderStatusDictSeeder extends Seeder
                     ['Cancelled', '已取消'],
                 ],
             ],
+            'ae_handover_list_status' => [
+                'name' => '速卖通-交接清单状态',
+                'items' => [
+                    ['Created', '已创建'],
+                    ['Transferred', '已传输'],
+                    ['Accepted', '已接受'],
+                    ['PartiallyAccepted', '部分接受'],
+                    ['Sent', '已发送'],
+                    ['Completed', '已完成'],
+                ],
+            ],
+            'ae_handover_shipment_type' => [
+                'name' => '速卖通-交接清单类型',
+                'items' => [
+                    ['Pickup', '上门揽收'],
+                    ['Dropoff', '自行交寄'],
+                ],
+            ],
+            'ae_undeliverable_option' => [
+                'name' => '速卖通-FBS投递失败处理',
+                'items' => [
+                    ['Return', '退回至卖家'],
+                    ['Recycling', '由物流服务商处置'],
+                ],
+            ],
+            'ae_danger_type' => [
+                'name' => '速卖通-FBS货物危险类型',
+                'items' => [
+                    ['General', '普通商品'],
+                    ['DangerLiquids', '液体'],
+                    ['ContainsBattery', '含电池'],
+                    ['SeparateBattery', '单独包装电池'],
+                ],
+            ],
             'ae_dispute_reason' => [
                 'name' => '速卖通-纠纷原因',
                 'items' => [

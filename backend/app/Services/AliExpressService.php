@@ -23,6 +23,11 @@ class AliExpressService
         $this->fbsMockService = new AliExpressFbsMockService();
     }
 
+    protected function thirdPartyLog()
+    {
+        return Log::channel('third_party');
+    }
+
     /**
      * 同步指定店铺的订单
      */
@@ -58,7 +63,7 @@ class AliExpressService
                 $data = $response->json();
 
                 if (!$response->successful() || isset($data['error'])) {
-                    Log::error('AliExpress API error', [
+                    $this->thirdPartyLog()->error('AliExpress API error', [
                         'shop_id' => $shop->id,
                         'status' => $response->status(),
                         'response' => $data,
@@ -75,7 +80,7 @@ class AliExpressService
 
                 $page++;
             } catch (\Exception $e) {
-                Log::error('AliExpress sync exception', [
+                $this->thirdPartyLog()->error('AliExpress sync exception', [
                     'shop_id' => $shop->id,
                     'message' => $e->getMessage(),
                 ]);
@@ -320,7 +325,7 @@ class AliExpressService
 
                 if (!$response->successful() || isset($data['error'])) {
                     $msg = $data['error']['message'] ?? ('发货请求失败: ' . $response->status());
-                    Log::warning('AliExpress markShip failed', [
+                    $this->thirdPartyLog()->warning('AliExpress markShip failed', [
                         'order_id' => $order->ae_order_id,
                         'posting_id' => $postingId,
                         'response' => $data,
@@ -331,7 +336,7 @@ class AliExpressService
                     $results[] = ['posting_id' => $postingId, 'ok' => true, 'message' => '发货成功'];
                 }
             } catch (\Exception $e) {
-                Log::error('AliExpress markShip exception', [
+                $this->thirdPartyLog()->error('AliExpress markShip exception', [
                     'order_id' => $order->ae_order_id,
                     'message' => $e->getMessage(),
                 ]);
@@ -364,7 +369,7 @@ class AliExpressService
             $body['tracking_url'] = $trackingUrl;
         }
 
-        Log::info('AliExpress offlineShip toInTransit request', [
+        $this->thirdPartyLog()->info('AliExpress offlineShip toInTransit request', [
             'order_id' => $order->ae_order_id,
             'tracking_number' => $trackingNumber,
             'provider_name' => $providerName,
@@ -391,14 +396,124 @@ class AliExpressService
             }
 
             $errorMsg = $data['error']['message'] ?? ($data['message'] ?? ('请求失败: ' . $response->status()));
-            Log::warning('AliExpress offlineShip toInTransit failed', [
+            $this->thirdPartyLog()->warning('AliExpress offlineShip toInTransit failed', [
                 'order_id' => $order->ae_order_id,
                 'response' => $data,
             ]);
 
             return ['success' => false, 'message' => $errorMsg, 'data' => $data];
         } catch (\Exception $e) {
-            Log::error('AliExpress offlineShip toInTransit exception', [
+            $this->thirdPartyLog()->error('AliExpress offlineShip toInTransit exception', [
+                'order_id' => $order->ae_order_id,
+                'message' => $e->getMessage(),
+            ]);
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * DBS 线下发货 → 将订单状态变更为 ReadyForPickup
+     * POST /api/v1/offline-ship/to-ready-for-pickup
+     */
+    public function offlineShipToReadyForPickup(Shop $shop, Order $order): array
+    {
+        $token = $shop->access_token;
+        if (!$token) {
+            return ['success' => false, 'message' => '店铺未配置access_token'];
+        }
+
+        $body = [
+            'trade_order_id' => (int) $order->ae_order_id,
+        ];
+
+        $this->thirdPartyLog()->info('AliExpress offlineShip toReadyForPickup request', [
+            'order_id' => $order->ae_order_id,
+        ]);
+
+        try {
+            $response = Http::withHeaders([
+                'x-auth-token' => $token,
+                'x-request-locale' => 'en',
+                'Content-Type' => 'application/json',
+            ])
+                ->withOptions(['verify' => $this->verifySsl])
+                ->timeout(30)
+                ->post($this->baseUrl . '/api/v1/offline-ship/to-ready-for-pickup', $body);
+
+            $data = $response->json();
+
+            if ($response->successful() && !isset($data['error'])) {
+                return [
+                    'success' => true,
+                    'message' => 'DBS发货状态已更新为ReadyForPickup',
+                    'data' => $data['data'] ?? $data,
+                ];
+            }
+
+            $errorMsg = $data['error']['message'] ?? ($data['message'] ?? ('请求失败: ' . $response->status()));
+            $this->thirdPartyLog()->warning('AliExpress offlineShip toReadyForPickup failed', [
+                'order_id' => $order->ae_order_id,
+                'response' => $data,
+            ]);
+
+            return ['success' => false, 'message' => $errorMsg, 'data' => $data];
+        } catch (\Exception $e) {
+            $this->thirdPartyLog()->error('AliExpress offlineShip toReadyForPickup exception', [
+                'order_id' => $order->ae_order_id,
+                'message' => $e->getMessage(),
+            ]);
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * DBS 线下发货 → 将订单状态变更为 Delivered
+     * POST /api/v1/offline-ship/to-delivered
+     */
+    public function offlineShipToDelivered(Shop $shop, Order $order): array
+    {
+        $token = $shop->access_token;
+        if (!$token) {
+            return ['success' => false, 'message' => '店铺未配置access_token'];
+        }
+
+        $body = [
+            'trade_order_id' => (int) $order->ae_order_id,
+        ];
+
+        $this->thirdPartyLog()->info('AliExpress offlineShip toDelivered request', [
+            'order_id' => $order->ae_order_id,
+        ]);
+
+        try {
+            $response = Http::withHeaders([
+                'x-auth-token' => $token,
+                'x-request-locale' => 'en',
+                'Content-Type' => 'application/json',
+            ])
+                ->withOptions(['verify' => $this->verifySsl])
+                ->timeout(30)
+                ->post($this->baseUrl . '/api/v1/offline-ship/to-delivered', $body);
+
+            $data = $response->json();
+
+            if ($response->successful() && !isset($data['error'])) {
+                return [
+                    'success' => true,
+                    'message' => 'DBS发货状态已更新为Delivered',
+                    'data' => $data['data'] ?? $data,
+                ];
+            }
+
+            $errorMsg = $data['error']['message'] ?? ($data['message'] ?? ('请求失败: ' . $response->status()));
+            $this->thirdPartyLog()->warning('AliExpress offlineShip toDelivered failed', [
+                'order_id' => $order->ae_order_id,
+                'response' => $data,
+            ]);
+
+            return ['success' => false, 'message' => $errorMsg, 'data' => $data];
+        } catch (\Exception $e) {
+            $this->thirdPartyLog()->error('AliExpress offlineShip toDelivered exception', [
                 'order_id' => $order->ae_order_id,
                 'message' => $e->getMessage(),
             ]);
@@ -462,18 +577,7 @@ class AliExpressService
         $height = (int) ($options['total_height'] ?? config('services.aliexpress.fbs_default_height', 5));
         $weight = (float) ($options['total_weight'] ?? config('services.aliexpress.fbs_default_weight', 0.5));
 
-        $rawLines = is_array(($order->raw_data ?? [])['order_lines'] ?? null)
-            ? ($order->raw_data ?? [])['order_lines']
-            : [];
-
-        $sourceBySku = [];
-        foreach ($rawLines as $line) {
-            $skuId = (string) ($line['sku_id'] ?? '');
-            $productSourceId = $line['product_source_id'] ?? null;
-            if ($skuId !== '' && $productSourceId !== null) {
-                $sourceBySku[$skuId] = (int) $productSourceId;
-            }
-        }
+        $sourceBySku = $this->extractFbsProductSourceBySku($order);
 
         $lines = $this->buildFbsLogisticLines($order, $options, $sourceBySku);
 
@@ -523,7 +627,7 @@ class AliExpressService
             $data = $response->json();
             if (!$response->successful() || isset($data['error'])) {
                 $msg = $data['error']['message'] ?? ('创建FBS发货单失败: ' . $response->status());
-                Log::warning('AliExpress createFbsLogisticOrder failed', [
+                $this->thirdPartyLog()->warning('AliExpress createFbsLogisticOrder failed', [
                     'order_id' => $order->ae_order_id,
                     'status' => $response->status(),
                     'response' => $data,
@@ -532,6 +636,30 @@ class AliExpressService
             }
 
             $logisticOrderId = (int) (($data['data']['orders'][0]['logistic_orders'][0]['id'] ?? 0));
+            $createErrors = is_array(data_get($data, 'data.errors')) ? data_get($data, 'data.errors') : [];
+
+            if (!empty($createErrors) || $logisticOrderId <= 0) {
+                $message = $this->extractFbsCreateLogisticOrderErrorMessage($data);
+                if ($message === '') {
+                    $message = $logisticOrderId <= 0
+                        ? '创建FBS发货单失败：平台未返回发货单ID'
+                        : '创建FBS发货单失败';
+                }
+
+                $this->thirdPartyLog()->warning('AliExpress createFbsLogisticOrder returned invalid payload', [
+                    'order_id' => $order->ae_order_id,
+                    'status' => $response->status(),
+                    'response' => $data,
+                ]);
+
+                return [
+                    'success' => false,
+                    'message' => $message,
+                    'data' => $data['data'] ?? null,
+                    'raw' => $data,
+                    'error_details' => $createErrors,
+                ];
+            }
 
             $this->orderLogisticsService->syncPrimary($order, [
                 'logistics_mode' => 'FBS',
@@ -556,7 +684,7 @@ class AliExpressService
                 ],
             ];
         } catch (\Throwable $e) {
-            Log::error('AliExpress createFbsLogisticOrder exception', [
+            $this->thirdPartyLog()->error('AliExpress createFbsLogisticOrder exception', [
                 'order_id' => $order->ae_order_id,
                 'message' => $e->getMessage(),
             ]);
@@ -947,7 +1075,7 @@ class AliExpressService
             return ['success' => false, 'message' => '未找到logistic_order_id，请先创建货件并同步订单后再打印'];
         }
 
-        Log::info('AliExpress getLabel request payload', [
+        $this->thirdPartyLog()->info('AliExpress getLabel request payload', [
             'order_id' => $order->ae_order_id,
             'logistic_order_ids' => $logisticOrderIds,
         ]);
@@ -983,7 +1111,7 @@ class AliExpressService
                 }
             }
 
-            Log::warning('AliExpress getLabel failed', [
+            $this->thirdPartyLog()->warning('AliExpress getLabel failed', [
                 'order_id' => $order->ae_order_id,
                 'logistic_order_ids' => $logisticOrderIds,
                 'response' => $result['raw'] ?? $result['data'] ?? null,
@@ -997,7 +1125,7 @@ class AliExpressService
                 'error_details' => $result['error_details'] ?? null,
             ];
         } catch (\Exception $e) {
-            Log::error('AliExpress getLabel exception', [
+            $this->thirdPartyLog()->error('AliExpress getLabel exception', [
                 'order_id' => $order->ae_order_id,
                 'logistic_order_ids' => $logisticOrderIds,
                 'message' => $e->getMessage(),
@@ -1012,7 +1140,7 @@ class AliExpressService
         $manualItems = is_array($options['items'] ?? null) ? $options['items'] : [];
         if (!empty($manualItems)) {
             return collect($manualItems)
-                ->map(function ($item) {
+                ->map(function ($item) use ($sourceBySku) {
                     if (!is_array($item)) {
                         return null;
                     }
@@ -1028,7 +1156,10 @@ class AliExpressService
                         'sku_id' => $skuId,
                     ];
 
-                    if (array_key_exists('product_source_id', $item) && $item['product_source_id'] !== '' && $item['product_source_id'] !== null) {
+                    $sourceKey = (string) $skuId;
+                    if (array_key_exists($sourceKey, $sourceBySku)) {
+                        $line['product_source_id'] = $sourceBySku[$sourceKey];
+                    } elseif (array_key_exists('product_source_id', $item) && $item['product_source_id'] !== '' && $item['product_source_id'] !== null) {
                         $line['product_source_id'] = (int) $item['product_source_id'];
                     }
 
@@ -1045,25 +1176,87 @@ class AliExpressService
             if (empty($item->ae_sku_id)) {
                 continue;
             }
+
             $skuId = (int) $item->ae_sku_id;
             $line = [
                 'quantity' => (int) ($item->quantity ?: 1),
                 'sku_id' => $skuId,
             ];
+
             $sourceKey = (string) $item->ae_sku_id;
             if (isset($sourceBySku[$sourceKey])) {
                 $line['product_source_id'] = $sourceBySku[$sourceKey];
             }
+
             $lines[] = $line;
         }
 
         return $lines;
     }
 
+    protected function extractFbsProductSourceBySku(Order $order): array
+    {
+        $rawData = $order->raw_data ?? [];
+        $rawLines = is_array($rawData['order_lines'] ?? null) ? $rawData['order_lines'] : [];
+        $sourceBySku = [];
+
+        foreach ($rawLines as $line) {
+            $skuId = (string) ($line['sku_id'] ?? '');
+            $productSourceId = $line['product_source_id'] ?? null;
+            if ($skuId !== '' && $productSourceId !== null) {
+                $sourceBySku[$skuId] = (int) $productSourceId;
+            }
+        }
+
+        $preSplitPostings = is_array($rawData['pre_split_postings'] ?? null) ? $rawData['pre_split_postings'] : [];
+        foreach ($preSplitPostings as $posting) {
+            $postingLines = is_array($posting['posting_lines'] ?? null) ? $posting['posting_lines'] : [];
+            foreach ($postingLines as $line) {
+                $skuId = (string) ($line['sku_id'] ?? '');
+                $productSourceId = $line['product_source_id'] ?? null;
+                if ($skuId !== '' && $productSourceId !== null && !array_key_exists($skuId, $sourceBySku)) {
+                    $sourceBySku[$skuId] = (int) $productSourceId;
+                }
+            }
+        }
+
+        return $sourceBySku;
+    }
+
     protected function extractPrimaryLogisticOrderId(Order $order): int
     {
         $ids = $this->extractFbsLogisticOrderIds($order);
         return !empty($ids) ? (int) $ids[0] : 0;
+    }
+
+    protected function extractFbsCreateLogisticOrderErrorMessage(array $response): string
+    {
+        $messages = $this->collectAliExpressNestedMessages(data_get($response, 'data.errors'));
+        if (!empty($messages)) {
+            return '创建FBS发货单失败：' . implode('；', array_slice($messages, 0, 3));
+        }
+
+        $message = trim((string) ($response['message'] ?? ''));
+        return $message;
+    }
+
+    protected function collectAliExpressNestedMessages($value): array
+    {
+        if (is_string($value)) {
+            $message = trim($value);
+            return $message !== '' ? [$message] : [];
+        }
+
+        if (!is_array($value)) {
+            return [];
+        }
+
+        $messages = [];
+        foreach ($value as $item) {
+            $messages = array_merge($messages, $this->collectAliExpressNestedMessages($item));
+        }
+
+        return array_values(array_unique($messages));
     }
 
     protected function extractFbsLogisticOrderIds(Order $order): array
@@ -1150,7 +1343,7 @@ class AliExpressService
             $data = $response->json();
             if (!$response->successful() || isset($data['error'])) {
                 $message = $data['error']['message'] ?? $data['message'] ?? ($defaultErrorMessage . ': ' . $response->status());
-                Log::warning('AliExpress seller api failed', array_merge($logContext, [
+                $this->thirdPartyLog()->warning('AliExpress seller api failed', array_merge($logContext, [
                     'path' => $path,
                     'status' => $response->status(),
                     'response' => $data,
@@ -1173,7 +1366,7 @@ class AliExpressService
                 'raw' => $data,
             ];
         } catch (\Throwable $e) {
-            Log::error('AliExpress seller api exception', array_merge($logContext, [
+            $this->thirdPartyLog()->error('AliExpress seller api exception', array_merge($logContext, [
                 'path' => $path,
                 'message' => $e->getMessage(),
             ]));

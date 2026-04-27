@@ -1,4 +1,11 @@
-import { ORDER_DICT_CODE, ORDER_TAB_LABELS, STATUS_TAG_TYPE } from './constants'
+import {
+  ORDER_DICT_CODE,
+  ORDER_TAB_LABELS,
+  STATUS_TAG_TYPE,
+  createDefaultSz56tForm,
+  createDefaultSz56tItem,
+  createDefaultSz56tVolume
+} from './constants'
 
 export function translateByCode(value, code, dictLabelMap = {}) {
   if (value === undefined || value === null || value === '') return '-'
@@ -20,6 +27,12 @@ export function getPaymentStatusLabel(status, dictLabelMap) {
 
 export function getDeliveryStatusLabel(status, dictLabelMap) {
   return translateByCode(status, ORDER_DICT_CODE.deliveryStatus, dictLabelMap)
+}
+
+export function getOrderDeliveryStatusLabel(order, dictLabelMap) {
+  if (!order || typeof order !== 'object') return '-'
+
+  return getDeliveryStatusLabel(order.delivery_status || order.deliveryStatus || '', dictLabelMap)
 }
 
 export function getBackendStatusLabel(status, dictLabelMap) {
@@ -235,13 +248,6 @@ export function calcProfitRate(order) {
   return ((profit / base) * 100).toFixed(2)
 }
 
-export function calcProfitCny(order, cnyExchangeRate) {
-  const profit = calcProfit(order)
-  const rate = parseFloat(cnyExchangeRate || 0)
-  if (!(rate > 0)) return '0.00'
-  return (profit / rate).toFixed(2)
-}
-
 export function buildShipItemsFromOrder(order) {
   return (order.items || []).map(item => ({
     quantity: Number(item.quantity || 1),
@@ -250,6 +256,113 @@ export function buildShipItemsFromOrder(order) {
     title: item.name || '',
     img_url: item.img_url || '',
     sku_code: item.sku_code || ''
+  }))
+}
+
+function getSz56tPayload(order) {
+  const logistics = order && order.current_logistics
+  const payload = logistics && logistics.payload
+  return payload && payload.sz56t ? payload.sz56t : {}
+}
+
+export function getSz56tProductIdFromOrder(order) {
+  const payload = getSz56tPayload(order)
+  return payload.product_id || ''
+}
+
+export function getSz56tWeightFromOrder(order, fallback = 100) {
+  const payload = getSz56tPayload(order)
+  const form = payload.form || {}
+  const savedWeight = Number(form.weight || 0)
+  if (savedWeight > 0) {
+    return savedWeight
+  }
+
+  return Number(fallback || 100)
+}
+
+function normalizeSz56tVolumeParams(savedForm = {}, fallbackWeight = 100) {
+  if (Array.isArray(savedForm.orderVolumeParam) && savedForm.orderVolumeParam.length) {
+    return savedForm.orderVolumeParam.map(item => createDefaultSz56tVolume(item))
+  }
+
+  const hasLegacyVolume = savedForm.length || savedForm.width || savedForm.height
+  if (!hasLegacyVolume) {
+    return []
+  }
+
+  return [createDefaultSz56tVolume({
+    volume_length: savedForm.length || null,
+    volume_width: savedForm.width || null,
+    volume_height: savedForm.height || null,
+    volume_weight: Number(savedForm.weight || fallbackWeight || 0) || null
+  })]
+}
+
+export function buildSz56tFormFromOrder(order, fallbackWeight = 100) {
+  const payload = getSz56tPayload(order)
+  const savedForm = payload.form || {}
+  const orderWeight = getSz56tWeightFromOrder(order, fallbackWeight)
+  const transactionUrl = order.trade_order_url || order.order_transactionurl || ''
+
+  return createDefaultSz56tForm({
+    order_customerinvoicecode: order.ae_order_id || '',
+    consignee_name: order.receiver_name || order.buyer_name || '',
+    consignee_companyname: order.receiver_company || '',
+    consignee_address: order.receiver_street || order.delivery_address || '',
+    consignee_telephone: order.receiver_phone || order.buyer_phone || '',
+    consignee_mobile: order.receiver_phone || order.buyer_phone || '',
+    consignee_city: order.receiver_city || '',
+    consignee_state: order.receiver_region || '',
+    consignee_postcode: order.receiver_zip || '',
+    consignee_email: order.receiver_email || order.buyer_email || '',
+    country: order.buyer_country_code || order.receiver_country || '',
+    order_transactionurl: transactionUrl,
+    product_imagepath: order.main_image || order.product_imagepath || '',
+    store_name: order.shop_name || '',
+    store_code: order.shop_code || '',
+    weight: orderWeight,
+    ...savedForm,
+    orderVolumeParam: normalizeSz56tVolumeParams(savedForm, orderWeight)
+  })
+}
+
+export function buildSz56tItemsFromOrder(order, fallbackWeight = 100) {
+  const payload = getSz56tPayload(order)
+  const savedItems = payload.items
+  if (Array.isArray(savedItems) && savedItems.length) {
+    return savedItems.map(item => createDefaultSz56tItem(item))
+  }
+
+  const orderItems = Array.isArray(order.items) ? order.items : []
+  const totalQuantity = orderItems.reduce((sum, item) => sum + Number(item.quantity || 1), 0)
+  const defaultUnitWeight = Math.max(1, Math.round(Number(fallbackWeight || 100) / Math.max(totalQuantity, 1)))
+
+  if (!orderItems.length) {
+    return [createDefaultSz56tItem({
+      sku: '商品',
+      invoice_title: 'Product',
+      invoice_amount: Number(order.total_amount || 0),
+      invoice_pcs: 1,
+      invoice_weight: Number(fallbackWeight || 100),
+      transaction_url: order.trade_order_url || order.order_transactionurl || ''
+    })]
+  }
+
+  return orderItems.map(item => createDefaultSz56tItem({
+    sku: item.name || '商品',
+    invoice_title: item.name || 'Product',
+    invoice_amount: Number(item.item_price || 0) * Number(item.quantity || 1),
+    invoice_pcs: Number(item.quantity || 1),
+    invoice_weight: defaultUnitWeight,
+    sku_code: item.sku_code || '',
+    hs_code: item.hs_code || '',
+    transaction_url: order.trade_order_url || order.order_transactionurl || '',
+    invoice_currency: item.currency || 'USD',
+    invoiceunit_code: 'PCS',
+    origin_country: 'CN',
+    invoice_export_currency: item.currency || 'USD',
+    invoice_imgurl: item.img_url || ''
   }))
 }
 
@@ -280,12 +393,267 @@ export function getFbsWorkflowStep(shipForm) {
   return currentStep > baseStep ? currentStep : baseStep
 }
 
+function normalizeLogisticsText(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function normalizeTrackingNumber(value) {
+  return String(value || '').trim().toUpperCase()
+}
+
+function resolvePrintLabelProviderByTrackingNumber(trackingNumber) {
+  const normalizedTrackingNumber = normalizeTrackingNumber(trackingNumber)
+
+  if (normalizedTrackingNumber.startsWith('AML')) {
+    return 'sz56t'
+  }
+
+  if (normalizedTrackingNumber.startsWith('LK')) {
+    return 'chinapost'
+  }
+
+  return ''
+}
+
+function appendPrintLabelProvider(providers, provider) {
+  if (!provider || providers.includes(provider)) {
+    return
+  }
+
+  providers.push(provider)
+}
+
+function getCurrentLogistics(order) {
+  if (!order || typeof order !== 'object') return null
+
+  const logistics = order.current_logistics || order.currentLogistics
+  return logistics && typeof logistics === 'object' ? logistics : null
+}
+
+function isCancelledOrder(order) {
+  if (!order || typeof order !== 'object') {
+    return false
+  }
+
+  const deliveryStatus = normalizeLogisticsText(order.delivery_status || order.deliveryStatus)
+  const finishReason = normalizeLogisticsText(order.finish_reason || order.finishReason)
+
+  return deliveryStatus === 'cancelled' || deliveryStatus === 'canceled' || finishReason.includes('cancel')
+}
+
+function ensureCurrentLogistics(order) {
+  if (!order || typeof order !== 'object') return null
+  if (!order.current_logistics || typeof order.current_logistics !== 'object') {
+    order.current_logistics = {}
+  }
+
+  return order.current_logistics
+}
+
+function getPrintLabelContext(order) {
+  if (!order || typeof order !== 'object') {
+    return {
+      logistics: {},
+      isDbs: false,
+      providerCode: '',
+      providerName: '',
+      templateCode: '',
+      externalOrderId: '',
+      platformLogisticOrderId: '',
+      trackingNumber: ''
+    }
+  }
+
+  const logistics = getCurrentLogistics(order) || {}
+  const payload = logistics.payload && typeof logistics.payload === 'object' ? logistics.payload : {}
+  const sz56tPayload = payload.sz56t && typeof payload.sz56t === 'object' ? payload.sz56t : {}
+  const aliexpressPayload = payload.aliexpress && typeof payload.aliexpress === 'object' ? payload.aliexpress : {}
+  const platformLogisticOrders = Array.isArray(aliexpressPayload.logistic_orders) ? aliexpressPayload.logistic_orders : []
+
+  return {
+    logistics,
+    isDbs: isDbsLogisticsType(order.logistics_type),
+    providerCode: normalizeLogisticsText(logistics.provider_code || logistics.providerCode),
+    providerName: normalizeLogisticsText(logistics.provider_name || logistics.providerName),
+    templateCode: normalizeLogisticsText(logistics.template_code || logistics.templateCode || order.logistics_template),
+    externalOrderId: logistics.external_order_id || logistics.externalOrderId || sz56tPayload.order_id || order.sz56t_order_id,
+    platformLogisticOrderId: logistics.platform_logistic_order_id || logistics.platformLogisticOrderId || (platformLogisticOrders[0] && platformLogisticOrders[0].id) || order.logistic_order_id,
+    trackingNumber: order.tracking_number || logistics.tracking_number || logistics.trackingNumber || ''
+  }
+}
+
+function getDbsPlatformShipmentContext(order) {
+  const logistics = getCurrentLogistics(order) || {}
+  const payload = logistics.payload && typeof logistics.payload === 'object' ? logistics.payload : {}
+  const offlineShip = payload.aliexpress_offline_ship && typeof payload.aliexpress_offline_ship === 'object'
+    ? payload.aliexpress_offline_ship
+    : {}
+
+  let currentStatus = normalizeLogisticsText(offlineShip.current_status)
+  if (!currentStatus) {
+    if (offlineShip.delivered_at) {
+      currentStatus = 'delivered'
+    } else if (offlineShip.ready_for_pickup_at) {
+      currentStatus = 'ready_for_pickup'
+    } else if (offlineShip.in_transit_at || order.marked_ship_at) {
+      currentStatus = 'in_transit'
+    }
+  }
+
+  return {
+    logistics,
+    offlineShip,
+    currentStatus
+  }
+}
+
+export function resolvePrintLabelProvider(order) {
+  return resolvePrintLabelProviderCandidates(order)[0] || ''
+}
+
+export function resolvePrintLabelProviderCandidates(order) {
+  if (!order || typeof order !== 'object') return []
+
+  const {
+    isDbs,
+    externalOrderId,
+    trackingNumber
+  } = getPrintLabelContext(order)
+
+  const providers = []
+
+  if (!isDbs) {
+    appendPrintLabelProvider(providers, 'platform')
+    return providers
+  }
+
+  const trackingProvider = resolvePrintLabelProviderByTrackingNumber(trackingNumber)
+  if (trackingProvider === 'sz56t') {
+    appendPrintLabelProvider(providers, 'sz56t')
+    return providers
+  }
+
+  if (trackingProvider === 'chinapost') {
+    appendPrintLabelProvider(providers, 'chinapost')
+    return providers
+  }
+
+  if (externalOrderId) {
+    appendPrintLabelProvider(providers, 'sz56t')
+  }
+
+  return providers
+}
+
 export function canPrintLabel(order) {
-  return Boolean(order && (order.sz56t_order_id || (order.tracking_number && isDbsLogisticsType(order.logistics_type)) || order.logistic_order_id))
+  const providers = resolvePrintLabelProviderCandidates(order)
+  const logistics = getCurrentLogistics(order) || {}
+  const logisticStatus = normalizeLogisticsText(logistics.logistic_status || logistics.logisticStatus)
+  const {
+    externalOrderId,
+    platformLogisticOrderId,
+    trackingNumber
+  } = getPrintLabelContext(order)
+
+  if (logisticStatus === 'cancelled' || isCancelledOrder(order)) {
+    return false
+  }
+
+  return providers.some(provider => {
+    if (provider === 'sz56t') {
+      return Boolean(externalOrderId || trackingNumber)
+    }
+
+    if (provider === 'chinapost') {
+      return Boolean(trackingNumber)
+    }
+
+    if (provider === 'platform') {
+      return Boolean(platformLogisticOrderId)
+    }
+
+    return false
+  })
 }
 
 export function canCreateTransferSheet(order) {
-  return Boolean(order && !isDbsLogisticsType(order.logistics_type) && order.logistic_order_id)
+  return Boolean(order && !isDbsLogisticsType(order.logistics_type) && !isCancelledOrder(order) && order.logistic_order_id)
+}
+
+export function canShipOrder(order) {
+  if (!order || !['WaitSendGoods', 'WaitingSellerSendGoods'].includes(order.order_display_status)) {
+    return false
+  }
+
+  if (!isDbsLogisticsType(order.logistics_type)) {
+    return true
+  }
+
+  return !order.actual_ship_at && !canCancelSz56tWaybill(order)
+}
+
+export function canSyncDbsOrderToPlatform(order) {
+  return canMarkDbsInTransit(order)
+}
+
+export function canMarkDbsInTransit(order) {
+  const { isDbs, trackingNumber } = getPrintLabelContext(order)
+  const logistics = getCurrentLogistics(order) || {}
+  const logisticStatus = normalizeLogisticsText(logistics.logistic_status || logistics.logisticStatus)
+  const { currentStatus } = getDbsPlatformShipmentContext(order)
+
+  return Boolean(order && isDbs && logisticStatus !== 'cancelled' && order.actual_ship_at && !currentStatus && trackingNumber)
+}
+
+export function canMarkDbsReadyForPickup(order) {
+  const { isDbs } = getPrintLabelContext(order)
+  const logistics = getCurrentLogistics(order) || {}
+  const logisticStatus = normalizeLogisticsText(logistics.logistic_status || logistics.logisticStatus)
+  const { currentStatus } = getDbsPlatformShipmentContext(order)
+
+  return Boolean(order && isDbs && logisticStatus !== 'cancelled' && currentStatus === 'in_transit')
+}
+
+export function canMarkDbsDelivered(order) {
+  const { isDbs } = getPrintLabelContext(order)
+  const logistics = getCurrentLogistics(order) || {}
+  const logisticStatus = normalizeLogisticsText(logistics.logistic_status || logistics.logisticStatus)
+  const { currentStatus } = getDbsPlatformShipmentContext(order)
+
+  return Boolean(order && isDbs && logisticStatus !== 'cancelled' && currentStatus === 'ready_for_pickup')
+}
+
+export function canCancelSz56tWaybill(order) {
+  if (!order || typeof order !== 'object') {
+    return false
+  }
+
+  const logistics = getCurrentLogistics(order) || {}
+  const logisticStatus = normalizeLogisticsText(logistics.logistic_status || logistics.logisticStatus)
+  const {
+    isDbs,
+    providerCode,
+    templateCode,
+    externalOrderId,
+    trackingNumber
+  } = getPrintLabelContext(order)
+  const { currentStatus } = getDbsPlatformShipmentContext(order)
+
+  if (!isDbs || logisticStatus === 'cancelled' || currentStatus) {
+    return false
+  }
+
+  const isSz56t =
+    providerCode === 'sz56t' ||
+    providerCode === 'leiyi' ||
+    templateCode === 'offline_leiyi' ||
+    Boolean(order && order.sz56t_order_id)
+
+  return Boolean(isSz56t && (externalOrderId || trackingNumber))
+}
+
+export function getMarkShipButtonText(order) {
+  return canSyncDbsOrderToPlatform(order) ? '发送到速卖通' : '更新订单'
 }
 
 export function createPdfObjectUrl(pdfBase64) {
@@ -317,7 +685,6 @@ export function applyCommentTempToOrder(order, commentTemp) {
     'purchase_amount',
     'express_fee',
     'logistics_fee',
-    'logistics_template',
     'eub_amazon_ratio',
     'eub_base_fee',
     'calculated_logistics_fee',
@@ -333,6 +700,18 @@ export function applyChinaPostCreateResult(order, waybillNo) {
   if (!order || !waybillNo) return
   order.tracking_number = waybillNo
   order.logistics_template = 'offline_epacket'
+
+  const logistics = ensureCurrentLogistics(order)
+  if (logistics) {
+    Object.assign(logistics, {
+      logistics_mode: 'DBS',
+      provider_code: 'chinapost',
+      provider_name: 'China Post',
+      template_code: 'offline_epacket',
+      tracking_number: waybillNo,
+      logistic_status: 'created'
+    })
+  }
 }
 
 export function applySz56tCreateResult(order, data = {}) {
@@ -344,11 +723,150 @@ export function applySz56tCreateResult(order, data = {}) {
     order.sz56t_order_id = data.order_id
   }
   order.logistics_template = 'offline_leiyi'
+
+  const logistics = ensureCurrentLogistics(order)
+  if (logistics) {
+    Object.assign(logistics, {
+      logistics_mode: 'DBS',
+      provider_code: 'sz56t',
+      provider_name: 'SZ56T',
+      template_code: 'offline_leiyi',
+      external_order_id: data.order_id || order.sz56t_order_id || null,
+      tracking_number: data.tracking_number || order.tracking_number || '',
+      logistic_status: 'created'
+    })
+  }
 }
 
-export function applyShipResult(order, resultData = {}, fallbackTracking = '') {
+export function applyShipResult(order, resultData = {}, fallbackTracking = '', shipProvider = '') {
   if (!order) return
   const returnedTracking = resultData && resultData.tracking_number ? resultData.tracking_number : fallbackTracking
   order.tracking_number = returnedTracking
   order.actual_ship_at = resultData && resultData.actual_ship_at ? resultData.actual_ship_at : new Date().toISOString()
+
+  const logistics = ensureCurrentLogistics(order)
+  if (logistics) {
+    logistics.tracking_number = returnedTracking
+    if (!logistics.logistics_mode) {
+      logistics.logistics_mode = order.logistics_type || ''
+    }
+  }
+
+  const providerResult = resultData && resultData.provider_result ? resultData.provider_result : {}
+  if (shipProvider === 'leiyi') {
+    order.logistics_template = 'offline_leiyi'
+    if (providerResult.order_id) {
+      order.sz56t_order_id = providerResult.order_id
+    }
+
+    if (logistics) {
+      Object.assign(logistics, {
+        logistics_mode: 'DBS',
+        provider_code: 'sz56t',
+        provider_name: 'SZ56T',
+        template_code: 'offline_leiyi',
+        external_order_id: providerResult.order_id || order.sz56t_order_id || null,
+        logistic_status: providerResult.mark_shipped && providerResult.mark_shipped.success ? 'posted' : 'created'
+      })
+    }
+  }
+
+  if (shipProvider === 'chinapost') {
+    order.logistics_template = 'offline_epacket'
+
+    if (logistics) {
+      Object.assign(logistics, {
+        logistics_mode: 'DBS',
+        provider_code: 'chinapost',
+        provider_name: 'China Post',
+        template_code: 'offline_epacket',
+        logistic_status: 'created'
+      })
+    }
+  }
+
+  if (shipProvider === 'manual' && logistics) {
+    Object.assign(logistics, {
+      logistics_mode: 'DBS',
+      provider_code: 'manual',
+      provider_name: order.provider_name || logistics.provider_name || 'Manual'
+    })
+  }
+}
+
+export function applyPlatformSyncResult(order, resultData = {}) {
+  if (!order) return
+
+  const platformStatus = resultData && resultData.platform_status ? resultData.platform_status : ''
+
+  if (resultData && resultData.marked_ship_at) {
+    order.marked_ship_at = resultData.marked_ship_at
+  } else if (platformStatus === 'in_transit') {
+    order.marked_ship_at = new Date().toISOString()
+  }
+
+  if (!order.actual_ship_at) {
+    if (resultData && resultData.actual_ship_at) {
+      order.actual_ship_at = resultData.actual_ship_at
+    } else if (platformStatus === 'in_transit') {
+      order.actual_ship_at = new Date().toISOString()
+    }
+  }
+
+  const logistics = ensureCurrentLogistics(order)
+  if (!logistics) {
+    return
+  }
+
+  const currentPayload = logistics.payload && typeof logistics.payload === 'object' ? logistics.payload : {}
+  const currentOfflineShip = currentPayload.aliexpress_offline_ship && typeof currentPayload.aliexpress_offline_ship === 'object'
+    ? currentPayload.aliexpress_offline_ship
+    : {}
+  const nextOfflineShip = resultData && resultData.platform_status_payload && typeof resultData.platform_status_payload === 'object'
+    ? resultData.platform_status_payload
+    : (platformStatus ? { current_status: platformStatus } : null)
+
+  if (nextOfflineShip) {
+    logistics.payload = {
+      ...currentPayload,
+      aliexpress_offline_ship: {
+        ...currentOfflineShip,
+        ...nextOfflineShip
+      }
+    }
+  }
+}
+
+export function applySz56tCancelResult(order) {
+  if (!order) return
+
+  order.tracking_number = ''
+  order.sz56t_order_id = ''
+  order.actual_ship_at = ''
+  order.marked_ship_at = ''
+  order.logistics_template = 'offline_leiyi'
+
+  const logistics = ensureCurrentLogistics(order)
+  if (!logistics) {
+    return
+  }
+
+  const currentPayload = logistics.payload && typeof logistics.payload === 'object' ? logistics.payload : {}
+  logistics.payload = {
+    ...currentPayload,
+    sz56t: {
+      ...(currentPayload.sz56t || {}),
+      order_id: null
+    }
+  }
+
+  Object.assign(logistics, {
+    logistics_mode: 'DBS',
+    provider_code: 'sz56t',
+    provider_name: 'SZ56T',
+    template_code: 'offline_leiyi',
+    external_order_id: null,
+    tracking_number: '',
+    logistic_status: 'cancelled'
+  })
 }

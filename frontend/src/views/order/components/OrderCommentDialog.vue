@@ -39,17 +39,10 @@
           </el-form-item>
         </el-col>
       </el-row>
-      <el-row :gutter="12">
-        <el-col :span="24">
-          <el-form-item label="物流模板">
-            <el-radio-group v-model="commentTemp.logistics_template" @change="$emit('template-change')">
-              <el-radio-button label="online">线上</el-radio-button>
-              <el-radio-button label="offline_leiyi">线下-雷翼/邮政</el-radio-button>
-              <el-radio-button label="offline_epacket">线下-E邮宝</el-radio-button>
-            </el-radio-group>
-          </el-form-item>
-        </el-col>
-      </el-row>
+      <el-form-item label="物流模板">
+        <div class="readonly-text">{{ logisticsTemplateLabel }}</div>
+        <div class="form-tip">物流模板由发货流程自动决定，这里不再手动选择。</div>
+      </el-form-item>
       <el-row v-if="commentTemp.logistics_template === 'offline_epacket'" :gutter="12">
         <el-col :span="12">
           <el-form-item label="亚马逊比例%">
@@ -139,6 +132,21 @@ export default {
       set(value) {
         this.$emit('update:visible', value)
       }
+    },
+    logisticsTemplateLabel() {
+      if (this.commentTemp.logistics_template === 'offline_epacket') {
+        return '线下-E邮宝'
+      }
+
+      if (this.commentTemp.logistics_template === 'offline_leiyi') {
+        return '线下-雷翼/邮政'
+      }
+
+      if (this.commentTemp.logistics_template === 'online') {
+        return '线上'
+      }
+
+      return this.commentTemp.logistics_template || '-'
     }
   },
   methods: {
@@ -151,3 +159,16 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+.readonly-text {
+  color: #606266;
+  line-height: 32px;
+}
+
+.form-tip {
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.6;
+}
+</style>

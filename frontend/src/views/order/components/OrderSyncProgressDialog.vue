@@ -14,7 +14,8 @@
       <el-table-column label="同步条数" prop="synced" width="100" align="center" />
       <el-table-column label="结果" min-width="220">
         <template slot-scope="{row}">
-          <span v-if="row.error" style="color: #f56c6c;">{{ row.error }}</span>
+          <span v-if="row.status === 'failed'" style="color: #f56c6c;">{{ row.error || '失败' }}</span>
+          <span v-else-if="row.status === 'skipped'" style="color: #e6a23c;">{{ row.error || '已跳过' }}</span>
           <span v-else style="color: #67c23a;">成功</span>
         </template>
       </el-table-column>

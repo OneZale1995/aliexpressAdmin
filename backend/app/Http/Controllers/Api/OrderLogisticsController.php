@@ -11,10 +11,16 @@ use App\Services\OrderLogisticsService;
 use App\Services\Sz56tService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class OrderLogisticsController extends Controller
 {
     use ApiResponse;
+
+    protected function thirdPartyLog()
+    {
+        return Log::channel('third_party');
+    }
 
     /**
      * 提交发货（调用速卖通 mark-ship API，同时记录本地）
@@ -29,6 +35,38 @@ class OrderLogisticsController extends Controller
             'logistic_method' => 'nullable|string|max:100',
             'ship_provider' => 'nullable|string|max:50',
             'provider_name' => 'nullable|string|max:100',
+            'biz_product_no' => 'nullable|string|max:10',
+            'product_type' => 'nullable|string|max:32',
+            'api_code' => 'nullable|string|max:16',
+            'sender_no' => 'nullable|string|max:64',
+            'msg_type' => 'nullable|string|max:10',
+            'version' => 'nullable|string|max:20',
+            'user_code' => 'nullable|string|max:64',
+            'product_id' => 'nullable|string|max:50',
+            'weight' => 'nullable|integer|min:1|max:50000',
+            'logistics_interface' => 'nullable|array',
+            'sz56t_form' => 'nullable|array',
+            'sz56t_form.order_returnsign' => 'nullable|in:Y,N',
+            'sz56t_form.length' => 'nullable|numeric|min:1|max:200',
+            'sz56t_form.width' => 'nullable|numeric|min:1|max:200',
+            'sz56t_form.height' => 'nullable|numeric|min:1|max:200',
+            'sz56t_form.consignee_name' => 'nullable|string|max:100',
+            'sz56t_form.consignee_address' => 'nullable|string|max:500',
+            'sz56t_form.consignee_telephone' => 'nullable|string|max:50',
+            'sz56t_form.consignee_mobile' => 'nullable|string|max:50',
+            'sz56t_form.consignee_city' => 'nullable|string|max:100',
+            'sz56t_form.consignee_state' => 'nullable|string|max:100',
+            'sz56t_form.consignee_postcode' => 'nullable|string|max:50',
+            'sz56t_form.country' => 'nullable|string|max:20',
+            'sz56t_form.consignee_email' => 'nullable|string|max:100',
+            'sz56t_items' => 'nullable|array',
+            'sz56t_items.*.invoice_title' => 'nullable|string|max:100',
+            'sz56t_items.*.invoice_amount' => 'nullable|numeric|min:0.01|max:999999',
+            'sz56t_items.*.invoice_pcs' => 'nullable|integer|min:1|max:9999',
+            'sz56t_items.*.invoice_weight' => 'nullable|numeric|min:0.01|max:50000',
+            'sz56t_items.*.sku_code' => 'nullable|string|max:100',
+            'sz56t_items.*.invoice_currency' => 'nullable|string|max:10',
+            'sz56t_items.*.origin_country' => 'nullable|string|max:20',
             'use_mock' => 'nullable|boolean',
             'total_length' => 'nullable|integer|min:1|max:200',
             'total_width' => 'nullable|integer|min:1|max:200',
@@ -46,19 +84,19 @@ class OrderLogisticsController extends Controller
         $service = new AliExpressService();
         $isDbs = strtoupper($order->logistics_type ?? '') === 'DBS';
         $useMock = (bool) $request->boolean('use_mock');
-
-        if ($isDbs && empty($request->track_number)) {
-            return $this->error('请输入运单号');
-        }
+        $dbsShipment = null;
 
         if ($isDbs) {
-            $providerName = $request->input('provider_name', 'China Post');
-            $result = $service->offlineShipToInTransit(
-                $order->shop,
-                $order,
-                $request->track_number,
-                $providerName
-            );
+            $dbsShipment = $this->prepareDbsShipment($order, $request);
+            if (!$dbsShipment['success']) {
+                return $this->error($dbsShipment['message'] ?? 'DBS 发货准备失败', 40000, $dbsShipment['data'] ?? []);
+            }
+
+            $result = [
+                'success' => true,
+                'message' => 'DBS 本地发货已记录，请手动点击按钮发送到速卖通',
+                'data' => null,
+            ];
         } else {
             $result = $service->shipFbs($order->shop, $order, [
                 'track_number' => $request->track_number,
@@ -73,28 +111,46 @@ class OrderLogisticsController extends Controller
             ]);
         }
 
-        $finalTrackingNumber = $request->track_number
+        $finalTrackingNumber = ($dbsShipment['tracking_number'] ?? null)
+            ?: $request->track_number
             ?: data_get($result, 'data.tracking_number')
             ?: data_get($result, 'data.mark_ship.tracking_number')
             ?: $order->tracking_number;
 
+        $providerCode = $dbsShipment['provider_code'] ?? $this->resolveShipProviderCode($request, $order, $isDbs);
+        $providerName = $dbsShipment['provider_name']
+            ?? ($isDbs
+                ? $request->input('provider_name', data_get($order, 'currentLogistics.provider_name') ?: 'China Post')
+                : 'AliExpress');
+
         $this->orderLogisticsService()->syncTracking($order, $finalTrackingNumber, [
             'logistics_mode' => $isDbs ? 'DBS' : 'FBS',
-            'provider_code' => $this->resolveShipProviderCode($request, $order, $isDbs),
-            'provider_name' => $isDbs
-                ? $request->input('provider_name', data_get($order, 'currentLogistics.provider_name') ?: 'China Post')
-                : 'AliExpress',
+            'provider_code' => $providerCode,
+            'provider_name' => $providerName,
         ]);
 
         $order->update([
             'tracking_number' => $finalTrackingNumber,
             'actual_ship_at' => now(),
-            'marked_ship_at' => $order->marked_ship_at ?? now(),
+            'marked_ship_at' => $isDbs ? $order->marked_ship_at : ($order->marked_ship_at ?? now()),
         ]);
 
         if ($result['success']) {
+            if ($isDbs) {
+                return $this->success([
+                    'ae_result' => null,
+                    'provider_result' => $dbsShipment['provider_result'] ?? null,
+                    'tracking_number' => $finalTrackingNumber,
+                    'actual_ship_at' => optional($order->actual_ship_at)->toDateTimeString(),
+                    'marked_ship_at' => optional($order->marked_ship_at)->toDateTimeString(),
+                    'platform_sync_required' => true,
+                    'mode' => 'DBS_local',
+                ], $result['message'] ?? 'DBS 本地发货已记录');
+            }
+
             return $this->success([
                 'ae_result' => $result['data'],
+                'provider_result' => $dbsShipment['provider_result'] ?? null,
                 'tracking_number' => $finalTrackingNumber,
                 'mode' => $isDbs ? 'DBS_offline' : 'FBS_online',
             ], '发货成功');
@@ -102,10 +158,239 @@ class OrderLogisticsController extends Controller
 
         return $this->success([
             'ae_result' => $result['data'] ?? null,
+            'provider_result' => $dbsShipment['provider_result'] ?? null,
             'tracking_number' => $finalTrackingNumber,
             'ae_error' => $result['message'],
             'mode' => $isDbs ? 'DBS_offline' : 'FBS_online',
         ], '本地已记录发货，速卖通接口返回: ' . $result['message']);
+    }
+
+    /**
+     * DBS: 手动发送发货信息到速卖通
+     */
+    public function dbsSyncPlatform(Request $request)
+    {
+        $request->validate([
+            'id' => 'required|exists:orders,id',
+        ]);
+
+        $order = Order::with(['shop', 'currentLogistics'])->findOrFail($request->id);
+        if ($response = $this->ensureOrderHasShop($order)) {
+            return $response;
+        }
+
+        if (strtoupper($order->logistics_type ?? '') !== 'DBS') {
+            return $this->error('当前订单不是 DBS 模式');
+        }
+
+        if (!$order->actual_ship_at) {
+            return $this->error('请先记录实际发货，再发送到速卖通');
+        }
+
+        $platformContext = $this->resolveDbsPlatformShipmentContext($order);
+        if ($platformContext['current_status'] !== '') {
+            return $this->error('该订单已发送到速卖通，无需重复发送');
+        }
+
+        $trackingNumber = trim((string) ($order->tracking_number ?: data_get($order, 'currentLogistics.tracking_number') ?: ''));
+        if ($trackingNumber === '') {
+            return $this->error('当前订单暂无运单号，请先记录实际发货');
+        }
+
+        $providerCode = (string) (
+            data_get($order, 'currentLogistics.provider_code')
+            ?: $this->orderLogisticsService()->resolveProviderCodeByTemplate($order->logistics_template)
+            ?: 'manual'
+        );
+
+        $providerName = (string) (
+            data_get($order, 'currentLogistics.provider_name')
+            ?: match ($providerCode) {
+                'chinapost' => 'China Post',
+                'sz56t' => 'SZ56T',
+                default => 'Manual',
+            }
+        );
+
+        $service = new AliExpressService();
+        $result = $service->offlineShipToInTransit(
+            $order->shop,
+            $order,
+            $trackingNumber,
+            $providerName
+        );
+
+        if (!$result['success']) {
+            return $this->error($result['message'] ?? '发送到速卖通失败', 40000, [
+                'tracking_number' => $trackingNumber,
+                'provider_name' => $providerName,
+                'ae_result' => $result['data'] ?? null,
+            ]);
+        }
+
+        $this->orderLogisticsService()->syncTracking($order, $trackingNumber, [
+            'logistics_mode' => 'DBS',
+            'provider_code' => $providerCode,
+            'provider_name' => $providerName,
+            'payload' => $this->buildDbsPlatformShipmentPayload($order, 'in_transit', $result['data'] ?? null),
+        ]);
+
+        $order->update([
+            'tracking_number' => $trackingNumber,
+            'marked_ship_at' => now(),
+        ]);
+
+        $platformPayload = data_get($this->buildDbsPlatformShipmentPayload($order, 'in_transit', $result['data'] ?? null), 'aliexpress_offline_ship', []);
+
+        return $this->success([
+            'tracking_number' => $trackingNumber,
+            'actual_ship_at' => optional($order->actual_ship_at)->toDateTimeString(),
+            'marked_ship_at' => optional($order->marked_ship_at)->toDateTimeString(),
+            'platform_status' => 'in_transit',
+            'platform_status_payload' => $platformPayload,
+            'ae_result' => $result['data'] ?? null,
+            'mode' => 'DBS_platform_sync',
+        ], $result['message'] ?? '已发送到速卖通');
+    }
+
+    /**
+     * DBS: 手动发送准备取货状态到速卖通
+     */
+    public function dbsReadyForPickup(Request $request)
+    {
+        $request->validate([
+            'id' => 'required|exists:orders,id',
+        ]);
+
+        $order = Order::with(['shop', 'currentLogistics'])->findOrFail($request->id);
+        if ($response = $this->ensureOrderHasShop($order)) {
+            return $response;
+        }
+
+        if (strtoupper($order->logistics_type ?? '') !== 'DBS') {
+            return $this->error('当前订单不是 DBS 模式');
+        }
+
+        $platformContext = $this->resolveDbsPlatformShipmentContext($order);
+        if ($platformContext['current_status'] !== 'in_transit') {
+            return $this->error('当前订单平台状态不是已发货，无法标记为准备取货');
+        }
+
+        $provider = $this->resolveDbsProvider($order);
+        $trackingNumber = trim((string) ($order->tracking_number ?: data_get($order, 'currentLogistics.tracking_number') ?: ''));
+
+        $service = new AliExpressService();
+        $result = $service->offlineShipToReadyForPickup($order->shop, $order);
+
+        if (!$result['success']) {
+            return $this->error($result['message'] ?? '发送准备取货状态失败', 40000, [
+                'ae_result' => $result['data'] ?? null,
+            ]);
+        }
+
+        $payload = $this->buildDbsPlatformShipmentPayload($order, 'ready_for_pickup', $result['data'] ?? null);
+        $this->orderLogisticsService()->syncTracking($order, $trackingNumber !== '' ? $trackingNumber : null, [
+            'logistics_mode' => 'DBS',
+            'provider_code' => $provider['code'],
+            'provider_name' => $provider['name'],
+            'payload' => $payload,
+        ]);
+
+        return $this->success([
+            'tracking_number' => $trackingNumber,
+            'actual_ship_at' => optional($order->actual_ship_at)->toDateTimeString(),
+            'marked_ship_at' => optional($order->marked_ship_at)->toDateTimeString(),
+            'platform_status' => 'ready_for_pickup',
+            'platform_status_payload' => data_get($payload, 'aliexpress_offline_ship', []),
+            'ae_result' => $result['data'] ?? null,
+            'mode' => 'DBS_platform_ready_for_pickup',
+        ], $result['message'] ?? '已发送准备取货状态到速卖通');
+    }
+
+    /**
+     * DBS: 手动发送已交付状态到速卖通
+     */
+    public function dbsDelivered(Request $request)
+    {
+        $request->validate([
+            'id' => 'required|exists:orders,id',
+        ]);
+
+        $order = Order::with(['shop', 'currentLogistics'])->findOrFail($request->id);
+        if ($response = $this->ensureOrderHasShop($order)) {
+            return $response;
+        }
+
+        if (strtoupper($order->logistics_type ?? '') !== 'DBS') {
+            return $this->error('当前订单不是 DBS 模式');
+        }
+
+        $platformContext = $this->resolveDbsPlatformShipmentContext($order);
+        if ($platformContext['current_status'] !== 'ready_for_pickup') {
+            return $this->error('当前订单平台状态不是准备取货，无法标记为已交付');
+        }
+
+        $provider = $this->resolveDbsProvider($order);
+        $trackingNumber = trim((string) ($order->tracking_number ?: data_get($order, 'currentLogistics.tracking_number') ?: ''));
+
+        $service = new AliExpressService();
+        $result = $service->offlineShipToDelivered($order->shop, $order);
+
+        if (!$result['success']) {
+            return $this->error($result['message'] ?? '发送已交付状态失败', 40000, [
+                'ae_result' => $result['data'] ?? null,
+            ]);
+        }
+
+        $payload = $this->buildDbsPlatformShipmentPayload($order, 'delivered', $result['data'] ?? null);
+        $this->orderLogisticsService()->syncTracking($order, $trackingNumber !== '' ? $trackingNumber : null, [
+            'logistics_mode' => 'DBS',
+            'provider_code' => $provider['code'],
+            'provider_name' => $provider['name'],
+            'payload' => $payload,
+        ]);
+
+        return $this->success([
+            'tracking_number' => $trackingNumber,
+            'actual_ship_at' => optional($order->actual_ship_at)->toDateTimeString(),
+            'marked_ship_at' => optional($order->marked_ship_at)->toDateTimeString(),
+            'platform_status' => 'delivered',
+            'platform_status_payload' => data_get($payload, 'aliexpress_offline_ship', []),
+            'ae_result' => $result['data'] ?? null,
+            'mode' => 'DBS_platform_delivered',
+        ], $result['message'] ?? '已发送已交付状态到速卖通');
+    }
+
+    /**
+     * DBS: 生成中国邮政请求参数预览
+     */
+    public function chinaPostPreview(Request $request)
+    {
+        $request->validate([
+            'id' => 'required|exists:orders,id',
+            'biz_product_no' => 'nullable|string|max:32',
+            'product_type' => 'nullable|string|max:32',
+            'api_code' => 'nullable|string|max:16',
+            'sender_no' => 'nullable|string|max:64',
+            'msg_type' => 'nullable|string|max:10',
+            'version' => 'nullable|string|max:20',
+            'user_code' => 'nullable|string|max:64',
+            'weight' => 'nullable|integer|min:1',
+            'logistics_interface' => 'nullable|array',
+        ]);
+
+        $order = Order::with(['shop', 'items', 'currentLogistics'])->findOrFail($request->id);
+        $service = new ChinaPostService();
+        $result = $service->previewCreateOrderRequest(
+            $order,
+            $this->normalizeChinaPostOrderOptions($order, $request->except(['id']))
+        );
+
+        if (!$result['success']) {
+            return $this->error($result['message'] ?? '中国邮政请求参数生成失败', 40000);
+        }
+
+        return $this->success($result['request'] ?? [], '中国邮政请求参数已生成');
     }
 
     /**
@@ -115,42 +400,64 @@ class OrderLogisticsController extends Controller
     {
         $request->validate([
             'id' => 'required|exists:orders,id',
-            'biz_product_no' => 'nullable|string|max:10',
+            'biz_product_no' => 'nullable|string|max:32',
+            'product_type' => 'nullable|string|max:32',
+            'api_code' => 'nullable|string|max:16',
+            'sender_no' => 'nullable|string|max:64',
+            'msg_type' => 'nullable|string|max:10',
+            'version' => 'nullable|string|max:20',
+            'user_code' => 'nullable|string|max:64',
             'weight' => 'nullable|integer|min:1',
+            'logistics_interface' => 'nullable|array',
+            'sender' => 'nullable|array',
+            'receiver' => 'nullable|array',
+            'items' => 'nullable|array',
         ]);
 
         $order = Order::with(['shop', 'items', 'currentLogistics'])->findOrFail($request->id);
-
-        $service = new ChinaPostService();
-        $result = $service->createOrder($order, [
-            'biz_product_no' => $request->input('biz_product_no', '001'),
-            'weight' => $request->input('weight'),
-        ]);
+        $options = $request->except(['id']);
+        $result = $this->createChinaPostOrder($order, $options);
 
         if ($result['success']) {
-            $waybillNo = $result['waybill_no'];
-            $this->orderLogisticsService()->syncPrimary($order, [
-                'logistics_mode' => $order->logistics_type ?: 'DBS',
-                'provider_code' => 'chinapost',
-                'provider_name' => 'China Post',
-                'template_code' => 'offline_epacket',
-                'tracking_number' => $waybillNo,
-                'payload' => [
-                    'chinapost' => [
-                        'waybill_no' => $waybillNo,
-                    ],
-                ],
-            ]);
+            $waybillNo = $result['tracking_number'];
 
             return $this->success([
                 'waybill_no' => $waybillNo,
-                'raw' => $result['raw'] ?? null,
+                'raw' => data_get($result, 'provider_result.raw'),
             ], '邮政下单成功，运单号: ' . $waybillNo);
         }
 
         return $this->error($result['message'], 40000, [
-            'error_code' => $result['error_code'] ?? null,
-            'raw' => $result['raw'] ?? null,
+            'error_code' => data_get($result, 'provider_result.error_code'),
+            'raw' => data_get($result, 'provider_result.raw'),
+        ]);
+    }
+
+    /**
+     * DBS: 中国邮政条码分配
+     */
+    public function chinaPostAllocateBarcode(Request $request)
+    {
+        $request->validate([
+            'id' => 'required|exists:orders,id',
+            'api_code' => 'nullable|string|max:16',
+            'logistics_interface' => 'nullable|array',
+        ]);
+
+        $order = Order::with(['shop', 'items', 'currentLogistics'])->findOrFail($request->id);
+        $result = $this->allocateChinaPostBarcode($order, $request->except(['id']));
+
+        if ($result['success']) {
+            return $this->success([
+                'tracking_number' => $result['tracking_number'] ?? '',
+                'waybill_no' => $result['tracking_number'] ?? '',
+                'raw' => data_get($result, 'provider_result.raw'),
+            ], $result['message'] ?? '邮政条码分配成功');
+        }
+
+        return $this->error($result['message'], 40000, [
+            'error_code' => data_get($result, 'provider_result.error_code'),
+            'raw' => data_get($result, 'provider_result.raw'),
         ]);
     }
 
@@ -177,9 +484,15 @@ class OrderLogisticsController extends Controller
         );
 
         if ($result['success']) {
+            $pdfBase64 = $result['pdf_base64'] ?? null;
+            if (!$pdfBase64 && isset($result['pdf_content']) && $result['pdf_content'] !== null) {
+                $pdfBase64 = base64_encode($result['pdf_content']);
+            }
+
             return $this->success([
-                'pdf_base64' => base64_encode($result['pdf_content']),
+                'pdf_base64' => $pdfBase64,
                 'waybill_no' => $result['waybill_no'],
+                'raw' => $result['raw'] ?? null,
             ], '邮政面单获取成功');
         }
 
@@ -222,45 +535,94 @@ class OrderLogisticsController extends Controller
             'id' => 'required|exists:orders,id',
             'product_id' => 'nullable|string|max:50',
             'weight' => 'nullable|integer|min:1',
+            'sz56t_form' => 'nullable|array',
+            'sz56t_form.order_returnsign' => 'nullable|in:Y,N',
+            'sz56t_form.length' => 'nullable|numeric|min:1|max:200',
+            'sz56t_form.width' => 'nullable|numeric|min:1|max:200',
+            'sz56t_form.height' => 'nullable|numeric|min:1|max:200',
+            'sz56t_form.consignee_name' => 'nullable|string|max:100',
+            'sz56t_form.consignee_address' => 'nullable|string|max:500',
+            'sz56t_form.consignee_telephone' => 'nullable|string|max:50',
+            'sz56t_form.consignee_mobile' => 'nullable|string|max:50',
+            'sz56t_form.consignee_city' => 'nullable|string|max:100',
+            'sz56t_form.consignee_state' => 'nullable|string|max:100',
+            'sz56t_form.consignee_postcode' => 'nullable|string|max:50',
+            'sz56t_form.country' => 'nullable|string|max:20',
+            'sz56t_form.consignee_email' => 'nullable|string|max:100',
+            'sz56t_items' => 'nullable|array',
+            'sz56t_items.*.invoice_title' => 'nullable|string|max:100',
+            'sz56t_items.*.invoice_amount' => 'nullable|numeric|min:0.01|max:999999',
+            'sz56t_items.*.invoice_pcs' => 'nullable|integer|min:1|max:9999',
+            'sz56t_items.*.invoice_weight' => 'nullable|numeric|min:0.01|max:50000',
+            'sz56t_items.*.sku_code' => 'nullable|string|max:100',
+            'sz56t_items.*.invoice_currency' => 'nullable|string|max:10',
+            'sz56t_items.*.origin_country' => 'nullable|string|max:20',
         ]);
 
         $order = Order::with(['shop', 'items', 'currentLogistics'])->findOrFail($request->id);
+        $options = $this->buildSz56tOrderOptions($request);
+        if ($message = $this->validateSz56tOrderOptions($options)) {
+            return $this->error($message);
+        }
 
-        $service = new Sz56tService();
-        $result = $service->createOrder($order, [
-            'product_id' => $request->input('product_id'),
-            'weight' => $request->input('weight'),
-        ]);
+        $result = $this->createSz56tOrder($order, $options);
 
         if ($result['success']) {
-            $this->orderLogisticsService()->syncPrimary($order, [
-                'logistics_mode' => $order->logistics_type ?: 'DBS',
-                'provider_code' => 'sz56t',
-                'provider_name' => 'SZ56T',
-                'template_code' => 'offline_leiyi',
-                'external_order_id' => $result['order_id'],
-                'tracking_number' => $result['tracking_number'] ?? null,
-                'payload' => [
-                    'sz56t' => [
-                        'is_delay' => $result['is_delay'] ?? null,
-                        'is_remote' => $result['is_remote'] ?? null,
-                        'reference_number' => $result['reference_number'] ?? null,
-                    ],
-                ],
-            ]);
+            $providerResult = $result['provider_result'] ?? [];
 
             return $this->success([
-                'order_id' => $result['order_id'],
-                'tracking_number' => $result['tracking_number'],
-                'is_delay' => $result['is_delay'],
-                'is_remote' => $result['is_remote'],
-                'reference_number' => $result['reference_number'] ?? '',
+                'order_id' => $providerResult['order_id'] ?? null,
+                'tracking_number' => $result['tracking_number'] ?? null,
+                'is_delay' => $providerResult['is_delay'] ?? false,
+                'is_remote' => $providerResult['is_remote'] ?? null,
+                'reference_number' => $providerResult['reference_number'] ?? '',
             ], $result['message']);
         }
 
         return $this->error($result['message'], 40000, [
-            'raw' => $result['raw'] ?? null,
+            'raw' => data_get($result, 'provider_result.raw'),
         ]);
+    }
+
+    /**
+     * DBS: 获取雷翼运输方式列表
+     */
+    public function sz56tProducts(Request $request)
+    {
+        $service = new Sz56tService();
+        $result = $service->getProductList($request->boolean('refresh'));
+
+        if (!$result['success']) {
+            return $this->error($result['message'] ?? '获取雷翼运输方式失败');
+        }
+
+        $items = collect(is_array($result['data'] ?? null) ? $result['data'] : [])
+            ->map(function ($item) {
+                $productId = trim((string) data_get($item, 'product_id', ''));
+                $shortName = trim((string) data_get($item, 'product_shortname', ''));
+                $expressType = trim((string) data_get($item, 'express_type', ''));
+
+                if ($productId === '') {
+                    return null;
+                }
+
+                $label = $shortName !== '' ? $shortName . ' (' . $productId . ')' : $productId;
+
+                return [
+                    'product_id' => $productId,
+                    'product_shortname' => $shortName,
+                    'express_type' => $expressType,
+                    'label' => $label,
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
+
+        return $this->success([
+            'items' => $items,
+            'cached' => (bool) ($result['cached'] ?? false),
+        ], '获取雷翼运输方式成功');
     }
 
     /**
@@ -273,20 +635,78 @@ class OrderLogisticsController extends Controller
             'print_type' => 'nullable|string|max:30',
         ]);
 
-        $order = Order::findOrFail($request->id);
+        $order = Order::with('currentLogistics')->findOrFail($request->id);
+        $logistics = $this->orderLogisticsService()->current($order);
+        $sz56tOrderId = (string) (
+            data_get($logistics, 'external_order_id')
+            ?: $order->sz56t_order_id
+            ?: data_get($logistics, 'payload.sz56t.order_id')
+            ?: ''
+        );
+        $service = new Sz56tService();
 
-        if (empty($order->sz56t_order_id)) {
-            return $this->error('该订单暂无雷翼订单号，请先创建雷翼订单');
+        $this->thirdPartyLog()->info('Sz56t getLabel request', [
+            'order_id' => $order->ae_order_id,
+            'tracking_number' => $order->tracking_number,
+            'sz56t_order_id' => $sz56tOrderId,
+        ]);
+
+        if ($sz56tOrderId === '') {
+            $trackingResult = $service->getTrackingNumber((string) $order->ae_order_id);
+
+            $this->thirdPartyLog()->info('Sz56t getLabel resolve order id by documentCode', [
+                'order_id' => $order->ae_order_id,
+                'tracking_number' => $order->tracking_number,
+                'external_order_id' => data_get($logistics, 'external_order_id'),
+                'tracking_result' => $trackingResult,
+            ]);
+
+            if (!($trackingResult['success'] ?? false) || empty($trackingResult['order_id'])) {
+                return $this->error($trackingResult['message'] ?? '该订单暂无雷翼订单号，且未能根据订单号获取');
+            }
+
+            $sz56tOrderId = (string) $trackingResult['order_id'];
+            $syncPayload = [
+                'logistics_mode' => $order->logistics_type ?: 'DBS',
+                'provider_code' => 'sz56t',
+                'provider_name' => 'SZ56T',
+                'template_code' => 'offline_leiyi',
+                'external_order_id' => $sz56tOrderId,
+                'payload' => [
+                    'sz56t' => [
+                        'order_id' => $sz56tOrderId,
+                        'tracking_lookup' => [
+                            'document_code' => (string) $order->ae_order_id,
+                            'response' => $trackingResult['raw'] ?? null,
+                            'resolved_at' => now()->toDateTimeString(),
+                        ],
+                    ],
+                ],
+            ];
+
+            if (!empty($trackingResult['tracking_number'])) {
+                $syncPayload['tracking_number'] = (string) $trackingResult['tracking_number'];
+            }
+
+            $this->orderLogisticsService()->syncPrimary($order, $syncPayload);
+            $order->refresh();
+            $order->load('currentLogistics');
         }
 
-        $service = new Sz56tService();
         $printType = $request->input('print_type', 'lab10_10');
-        $labelUrl = $service->getLabelUrl($order->sz56t_order_id, $printType);
+        $result = $service->getLabel($sz56tOrderId, $printType);
+
+        if (!$result['success']) {
+            return $this->error($result['message'] ?? '雷翼面单暂不可用', 40000, [
+                'sz56t_order_id' => $sz56tOrderId,
+            ]);
+        }
 
         return $this->success([
-            'label_url' => $labelUrl,
-            'sz56t_order_id' => $order->sz56t_order_id,
-        ], '面单URL获取成功');
+            'label_url' => $result['label_url'] ?? null,
+            'pdf_base64' => $result['pdf_base64'] ?? null,
+            'sz56t_order_id' => $sz56tOrderId,
+        ], '面单获取成功');
     }
 
     /**
@@ -298,14 +718,33 @@ class OrderLogisticsController extends Controller
             'id' => 'required|exists:orders,id',
         ]);
 
-        $order = Order::findOrFail($request->id);
+        $order = Order::with('currentLogistics')->findOrFail($request->id);
 
-        $invoiceCode = $order->ae_order_id;
+        $invoiceCode = $this->resolveSz56tCustomerInvoiceCode($order);
         $service = new Sz56tService();
         $result = $service->markShipped($invoiceCode);
 
         if ($result['success']) {
-            return $this->success($result['data'], '交寄预报成功');
+            $this->orderLogisticsService()->syncPrimary($order, [
+                'logistics_mode' => $order->logistics_type ?: 'DBS',
+                'provider_code' => 'sz56t',
+                'provider_name' => 'SZ56T',
+                'template_code' => 'offline_leiyi',
+                'logistic_status' => 'posted',
+                'payload' => [
+                    'sz56t' => [
+                        'mark_shipped' => [
+                            'success' => true,
+                            'message' => $result['message'] ?? '交寄预报成功',
+                            'response' => $result['data'] ?? null,
+                            'posted_at' => now()->toDateTimeString(),
+                            'order_customerinvoicecode' => $invoiceCode,
+                        ],
+                    ],
+                ],
+            ]);
+
+            return $this->success($result['data'], $result['message'] ?? '交寄预报成功');
         }
 
         return $this->error($result['message']);
@@ -323,7 +762,7 @@ class OrderLogisticsController extends Controller
         $order = Order::findOrFail($request->id);
 
         $service = new Sz56tService();
-        $result = $service->getTrackingNumber($order->ae_order_id);
+        $result = $service->getTrackingNumber((string) $order->ae_order_id, $order->sz56t_order_id ? (string) $order->sz56t_order_id : null);
 
         if ($result['success'] && !empty($result['tracking_number'])) {
             $this->orderLogisticsService()->syncTracking($order, $result['tracking_number'], [
@@ -341,6 +780,75 @@ class OrderLogisticsController extends Controller
     }
 
     /**
+     * DBS: 取消雷翼订单
+     */
+    public function sz56tCancelOrder(Request $request)
+    {
+        $request->validate([
+            'id' => 'required|exists:orders,id',
+            'reason' => 'nullable|string|max:255',
+        ]);
+
+        $order = Order::with('currentLogistics')->findOrFail($request->id);
+        $logistics = $this->orderLogisticsService()->current($order);
+
+        $orderId = (string) (
+            data_get($logistics, 'external_order_id')
+            ?: $order->sz56t_order_id
+            ?: data_get($logistics, 'payload.sz56t.order_id')
+            ?: ''
+        );
+
+        if ($orderId === '') {
+            return $this->error('该订单暂无雷翼订单号，无法取消');
+        }
+
+        $customerId = (string) (data_get($logistics, 'payload.sz56t.customer_id') ?: '');
+        $reason = $request->input('reason', 'manual cancel');
+
+        $service = new Sz56tService();
+        $result = $service->cancelOrder($orderId, $customerId, $reason);
+
+        if (!$result['success']) {
+            return $this->error($result['message'], 40000, [
+                'raw' => $result['raw'] ?? null,
+                'order_id' => $orderId,
+            ]);
+        }
+
+        $this->orderLogisticsService()->syncPrimary($order, [
+            'logistics_mode' => $order->logistics_type ?: 'DBS',
+            'provider_code' => 'sz56t',
+            'provider_name' => 'SZ56T',
+            'template_code' => 'offline_leiyi',
+            'external_order_id' => null,
+            'tracking_number' => null,
+            'logistic_status' => 'cancelled',
+            'payload' => [
+                'sz56t' => [
+                    'order_id' => null,
+                    'cancelled_order_id' => $orderId,
+                    'customer_id' => $customerId ?: ($result['customer_id'] ?? null),
+                    'cancel_reason' => $reason,
+                    'cancelled_at' => now()->toDateTimeString(),
+                    'cancel_response' => $result['raw'] ?? null,
+                ],
+            ],
+        ]);
+
+        $order->forceFill([
+            'actual_ship_at' => null,
+            'marked_ship_at' => null,
+        ])->saveQuietly();
+
+        return $this->success([
+            'order_id' => $orderId,
+            'msg_code' => $result['msg_code'] ?? null,
+            'raw' => $result['raw'] ?? null,
+        ], $result['message'] ?? '雷翼订单取消成功');
+    }
+
+    /**
      * 获取发货面单（PDF URL）
      */
     public function printLabel(Request $request)
@@ -355,14 +863,16 @@ class OrderLogisticsController extends Controller
         }
 
         if (empty($order->logistic_order_id)) {
+            $currentLogistics = $this->orderLogisticsService()->current($order);
             $rawData = $order->raw_data ?? [];
             $logisticOrders = is_array($rawData['logistic_orders'] ?? null) ? $rawData['logistic_orders'] : [];
-            $fallbackId = (!empty($logisticOrders) && !empty($logisticOrders[0]['id'])) ? (int) $logisticOrders[0]['id'] : null;
+            $fallbackId = (int) (
+                data_get($currentLogistics, 'platform_logistic_order_id')
+                ?: data_get($currentLogistics, 'payload.aliexpress.logistic_orders.0.id')
+                ?: ((!empty($logisticOrders) && !empty($logisticOrders[0]['id'])) ? (int) $logisticOrders[0]['id'] : 0)
+            );
             if ($fallbackId) {
                 $this->orderLogisticsService()->syncPrimary($order, [
-                    'logistics_mode' => 'FBS',
-                    'provider_code' => 'aliexpress',
-                    'provider_name' => 'AliExpress',
                     'platform_logistic_order_id' => $fallbackId,
                 ]);
                 $order->load('currentLogistics');
@@ -657,9 +1167,473 @@ class OrderLogisticsController extends Controller
         return new OrderLogisticsService();
     }
 
+    private function resolveDbsProvider(Order $order): array
+    {
+        $providerCode = (string) (
+            data_get($order, 'currentLogistics.provider_code')
+            ?: $this->orderLogisticsService()->resolveProviderCodeByTemplate($order->logistics_template)
+            ?: 'manual'
+        );
+
+        $providerName = (string) (
+            data_get($order, 'currentLogistics.provider_name')
+            ?: match ($providerCode) {
+                'chinapost' => 'China Post',
+                'sz56t' => 'SZ56T',
+                default => 'Manual',
+            }
+        );
+
+        return [
+            'code' => $providerCode,
+            'name' => $providerName,
+        ];
+    }
+
+    private function resolveDbsPlatformShipmentContext(Order $order): array
+    {
+        $logistics = $this->orderLogisticsService()->current($order);
+        $payload = is_array(data_get($logistics, 'payload')) ? data_get($logistics, 'payload') : [];
+        $offlineShip = is_array(data_get($payload, 'aliexpress_offline_ship')) ? data_get($payload, 'aliexpress_offline_ship') : [];
+        $currentStatus = strtolower(trim((string) ($offlineShip['current_status'] ?? '')));
+
+        if ($currentStatus === '') {
+            if (!empty($offlineShip['delivered_at'])) {
+                $currentStatus = 'delivered';
+            } elseif (!empty($offlineShip['ready_for_pickup_at'])) {
+                $currentStatus = 'ready_for_pickup';
+            } elseif (!empty($offlineShip['in_transit_at']) || $order->marked_ship_at) {
+                $currentStatus = 'in_transit';
+            }
+        }
+
+        return [
+            'logistics' => $logistics,
+            'offline_ship' => $offlineShip,
+            'current_status' => $currentStatus,
+        ];
+    }
+
+    private function buildDbsPlatformShipmentPayload(Order $order, string $status, $responseData = null): array
+    {
+        $context = $this->resolveDbsPlatformShipmentContext($order);
+        $offlineShip = is_array($context['offline_ship'] ?? null) ? $context['offline_ship'] : [];
+        $timestamp = now()->toDateTimeString();
+
+        $offlineShip['current_status'] = $status;
+        $offlineShip['last_response'] = $responseData;
+        $offlineShip['last_synced_at'] = $timestamp;
+
+        if (empty($offlineShip['in_transit_at']) && $order->marked_ship_at) {
+            $offlineShip['in_transit_at'] = $order->marked_ship_at->toDateTimeString();
+        }
+
+        if ($status === 'in_transit' && empty($offlineShip['in_transit_at'])) {
+            $offlineShip['in_transit_at'] = $timestamp;
+        }
+
+        if ($status === 'ready_for_pickup') {
+            if (empty($offlineShip['in_transit_at'])) {
+                $offlineShip['in_transit_at'] = $timestamp;
+            }
+            $offlineShip['ready_for_pickup_at'] = $timestamp;
+        }
+
+        if ($status === 'delivered') {
+            if (empty($offlineShip['in_transit_at'])) {
+                $offlineShip['in_transit_at'] = $timestamp;
+            }
+            if (empty($offlineShip['ready_for_pickup_at'])) {
+                $offlineShip['ready_for_pickup_at'] = $timestamp;
+            }
+            $offlineShip['delivered_at'] = $timestamp;
+        }
+
+        return [
+            'aliexpress_offline_ship' => $offlineShip,
+        ];
+    }
+
     private function fbsWorkflowService(): OrderFbsWorkflowService
     {
         return new OrderFbsWorkflowService();
+    }
+
+    private function prepareDbsShipment(Order $order, Request $request): array
+    {
+        $providerCode = strtolower((string) $request->input('ship_provider', 'manual'));
+        if ($providerCode === 'sz56t') {
+            $providerCode = 'leiyi';
+        }
+
+        $trackingNumber = trim((string) $request->input('track_number', ''));
+
+        if ($providerCode === 'chinapost') {
+            if ($trackingNumber === '') {
+                return $this->createChinaPostOrder($order, [
+                    'biz_product_no' => $request->input('biz_product_no', '019'),
+                    'product_type' => $request->input('product_type', 'E邮宝'),
+                    'api_code' => $request->input('api_code'),
+                    'sender_no' => $request->input('sender_no'),
+                    'msg_type' => $request->input('msg_type'),
+                    'version' => $request->input('version'),
+                    'user_code' => $request->input('user_code'),
+                    'weight' => $request->input('weight'),
+                    'logistics_interface' => $request->input('logistics_interface'),
+                ]);
+            }
+
+            return [
+                'success' => true,
+                'tracking_number' => $trackingNumber,
+                'provider_code' => 'chinapost',
+                'provider_name' => 'China Post',
+                'provider_result' => null,
+            ];
+        }
+
+        if ($providerCode === 'leiyi') {
+            if ($trackingNumber === '') {
+                $options = $this->buildSz56tOrderOptions($request);
+                if ($message = $this->validateSz56tOrderOptions($options)) {
+                    return [
+                        'success' => false,
+                        'message' => $message,
+                    ];
+                }
+
+                $result = $this->createSz56tOrder($order, $options);
+
+                if (!$result['success']) {
+                    return $result;
+                }
+
+                if (empty($result['tracking_number'])) {
+                    return [
+                        'success' => false,
+                        'message' => '雷翼下单成功，但暂未获取到跟踪号，无法同步速卖通状态，请稍后重试。',
+                        'data' => [
+                            'provider_result' => $result['provider_result'] ?? null,
+                            'order_id' => data_get($result, 'provider_result.order_id'),
+                        ],
+                    ];
+                }
+
+                return $result;
+            }
+
+            return [
+                'success' => true,
+                'tracking_number' => $trackingNumber,
+                'provider_code' => 'sz56t',
+                'provider_name' => 'SZ56T',
+                'provider_result' => null,
+            ];
+        }
+
+        if ($trackingNumber === '') {
+            return [
+                'success' => false,
+                'message' => '请输入运单号',
+            ];
+        }
+
+        return [
+            'success' => true,
+            'tracking_number' => $trackingNumber,
+            'provider_code' => 'manual',
+            'provider_name' => $request->input('provider_name', data_get($order, 'currentLogistics.provider_name') ?: 'Manual'),
+            'provider_result' => null,
+        ];
+    }
+
+    private function normalizeChinaPostOrderOptions(Order $order, array $options = []): array
+    {
+        $options['biz_product_no'] = '019';
+
+        if (!array_key_exists('product_type', $options) || trim((string) $options['product_type']) === '') {
+            $options['product_type'] = 'E邮宝';
+        }
+
+        if (isset($options['logistics_interface']) && is_array($options['logistics_interface'])) {
+            $options['logistics_interface']['biz_product_no'] = '019';
+            $options['logistics_interface']['logistics_order_no'] = (string) ($options['logistics_interface']['logistics_order_no'] ?? $order->ae_order_id);
+
+            if (empty($options['sender_no']) && !empty($options['logistics_interface']['sender_no'])) {
+                $options['sender_no'] = (string) $options['logistics_interface']['sender_no'];
+            }
+        }
+
+        return $options;
+    }
+
+    private function createChinaPostOrder(Order $order, array $options = []): array
+    {
+        $service = new ChinaPostService();
+        $options = $this->normalizeChinaPostOrderOptions($order, $options);
+
+        $result = $service->createOrder($order, $options);
+
+        if (!$result['success']) {
+            return [
+                'success' => false,
+                'message' => $result['message'] ?? '邮政下单失败',
+                'provider_result' => $result,
+            ];
+        }
+
+        $trackingNumber = (string) ($result['waybill_no'] ?? '');
+        if ($trackingNumber === '') {
+            return [
+                'success' => false,
+                'message' => '邮政下单成功，但未返回运单号',
+                'provider_result' => $result,
+            ];
+        }
+
+        $this->orderLogisticsService()->syncPrimary($order, [
+            'logistics_mode' => $order->logistics_type ?: 'DBS',
+            'provider_code' => 'chinapost',
+            'provider_name' => 'China Post',
+            'template_code' => 'offline_epacket',
+            'tracking_number' => $trackingNumber,
+            'logistic_status' => 'created',
+            'payload' => [
+                'chinapost' => [
+                    'waybill_no' => $trackingNumber,
+                    'biz_product_no' => '019',
+                    'request' => $result['request'] ?? null,
+                ],
+            ],
+        ]);
+
+        return [
+            'success' => true,
+            'tracking_number' => $trackingNumber,
+            'provider_code' => 'chinapost',
+            'provider_name' => 'China Post',
+            'provider_result' => $result,
+        ];
+    }
+
+    private function allocateChinaPostBarcode(Order $order, array $options = []): array
+    {
+        $service = new ChinaPostService();
+        $result = $service->allocateBarcode($order, $options);
+
+        if (!$result['success']) {
+            return [
+                'success' => false,
+                'message' => $result['message'] ?? '邮政条码分配失败',
+                'provider_result' => $result,
+            ];
+        }
+
+        $trackingNumber = (string) ($result['tracking_number'] ?? $result['waybill_no'] ?? '');
+        if ($trackingNumber !== '') {
+            $this->orderLogisticsService()->syncPrimary($order, [
+                'logistics_mode' => $order->logistics_type ?: 'DBS',
+                'provider_code' => 'chinapost',
+                'provider_name' => 'China Post',
+                'template_code' => 'offline_epacket',
+                'tracking_number' => $trackingNumber,
+                'logistic_status' => 'created',
+                'payload' => [
+                    'chinapost' => [
+                        'waybill_no' => $trackingNumber,
+                        'barcode_allocation' => $result['ret_body'] ?? [],
+                    ],
+                ],
+            ]);
+        }
+
+        return [
+            'success' => true,
+            'message' => $trackingNumber !== '' ? '邮政条码分配成功' : '邮政条码分配成功，但未解析到运单号',
+            'tracking_number' => $trackingNumber,
+            'provider_code' => 'chinapost',
+            'provider_name' => 'China Post',
+            'provider_result' => $result,
+        ];
+    }
+
+    private function createSz56tOrder(Order $order, array $options = []): array
+    {
+        $weightInKg = null;
+        if (array_key_exists('weight', $options) && $options['weight'] !== null && $options['weight'] !== '') {
+            $weightInKg = round(((float) $options['weight']) / 1000, 3);
+        }
+
+        $serviceForm = $this->normalizeSz56tFormForService(is_array($options['form'] ?? null) ? $options['form'] : []);
+        $invoiceItems = $this->normalizeSz56tInvoiceItems(is_array($options['invoice_items'] ?? null) ? $options['invoice_items'] : []);
+
+        $service = new Sz56tService();
+        $result = $service->createOrder($order, [
+            'product_id' => $options['product_id'] ?? null,
+            'weight' => $weightInKg,
+            'form' => $serviceForm,
+            'invoice_items' => $invoiceItems,
+        ]);
+
+        if (!$result['success']) {
+            return [
+                'success' => false,
+                'message' => $result['message'] ?? '雷翼下单失败',
+                'provider_result' => $result,
+            ];
+        }
+
+        $trackingNumber = (string) ($result['tracking_number'] ?? '');
+        if ($trackingNumber === '' && !empty($result['order_id'])) {
+            $trackingResult = $service->getTrackingNumber((string) $order->ae_order_id, (string) $result['order_id']);
+            if (!empty($trackingResult['success']) && !empty($trackingResult['tracking_number'])) {
+                $trackingNumber = (string) $trackingResult['tracking_number'];
+                $result['tracking_number'] = $trackingNumber;
+                $result['tracking_raw'] = $trackingResult['raw'] ?? null;
+            }
+        }
+
+        $customerInvoiceCode = $this->resolveSz56tCustomerInvoiceCode($order, $options);
+        $markShippedResult = $service->markShipped($customerInvoiceCode);
+
+        $payload = [
+            'sz56t' => [
+                'product_id' => $options['product_id'] ?? null,
+                'form' => array_merge($options['form'] ?? [], [
+                    'weight' => $options['weight'] ?? null,
+                ]),
+                'items' => $options['invoice_items'] ?? [],
+                'order_id' => $result['order_id'] ?? null,
+                'customer_id' => $result['customer_id'] ?? null,
+                'customer_userid' => $result['customer_userid'] ?? null,
+                'is_delay' => $result['is_delay'] ?? null,
+                'is_remote' => $result['is_remote'] ?? null,
+                'reference_number' => $result['reference_number'] ?? null,
+                'tracking_raw' => $result['tracking_raw'] ?? null,
+                'mark_shipped' => [
+                    'success' => $markShippedResult['success'] ?? false,
+                    'message' => $markShippedResult['message'] ?? '',
+                    'response' => $markShippedResult['data'] ?? ($markShippedResult['raw'] ?? null),
+                    'posted_at' => !empty($markShippedResult['success']) ? now()->toDateTimeString() : null,
+                    'order_customerinvoicecode' => $customerInvoiceCode,
+                ],
+            ],
+        ];
+
+        $syncAttributes = [
+            'logistics_mode' => $order->logistics_type ?: 'DBS',
+            'provider_code' => 'sz56t',
+            'provider_name' => 'SZ56T',
+            'template_code' => 'offline_leiyi',
+            'external_order_id' => $result['order_id'] ?? null,
+            'tracking_number' => $trackingNumber ?: null,
+            'logistic_status' => 'created',
+            'payload' => $payload,
+        ];
+
+        if (!empty($markShippedResult['success'])) {
+            $syncAttributes['logistic_status'] = 'posted';
+        }
+
+        $this->orderLogisticsService()->syncPrimary($order, $syncAttributes);
+
+        $providerResult = $result;
+        $providerResult['mark_shipped'] = [
+            'success' => $markShippedResult['success'] ?? false,
+            'message' => $markShippedResult['message'] ?? '',
+            'response' => $markShippedResult['data'] ?? ($markShippedResult['raw'] ?? null),
+            'order_customerinvoicecode' => $customerInvoiceCode,
+        ];
+
+        return [
+            'success' => true,
+            'tracking_number' => $trackingNumber,
+            'provider_code' => 'sz56t',
+            'provider_name' => 'SZ56T',
+            'provider_result' => $providerResult,
+            'message' => !empty($markShippedResult['success'])
+                ? (($result['message'] ?? '雷翼下单成功') . '，已提交交寄预报')
+                : (($result['message'] ?? '雷翼下单成功') . '，但交寄预报失败，请稍后重试'),
+        ];
+    }
+
+    private function resolveSz56tCustomerInvoiceCode(Order $order, array $options = []): string
+    {
+        return trim((string) (
+            data_get($options, 'form.order_customerinvoicecode')
+            ?: data_get($order, 'currentLogistics.payload.sz56t.form.order_customerinvoicecode')
+            ?: $order->ae_order_id
+            ?: ''
+        ));
+    }
+
+    private function normalizeSz56tFormForService(array $form): array
+    {
+        if (!is_array($form['orderVolumeParam'] ?? null)) {
+            return $form;
+        }
+
+        $form['orderVolumeParam'] = collect($form['orderVolumeParam'])
+            ->map(function ($item) {
+                if (!is_array($item)) {
+                    return null;
+                }
+
+                return [
+                    'volume_length' => $item['volume_length'] ?? null,
+                    'volume_width' => $item['volume_width'] ?? null,
+                    'volume_height' => $item['volume_height'] ?? null,
+                    'volume_weight' => isset($item['volume_weight']) && $item['volume_weight'] !== ''
+                        ? round(((float) $item['volume_weight']) / 1000, 3)
+                        : null,
+                ];
+            })
+            ->filter(function ($item) {
+                if (!is_array($item)) {
+                    return false;
+                }
+
+                return $item['volume_length'] !== null
+                    || $item['volume_width'] !== null
+                    || $item['volume_height'] !== null
+                    || $item['volume_weight'] !== null;
+            })
+            ->values()
+            ->all();
+
+        return $form;
+    }
+
+    private function normalizeSz56tInvoiceItems(array $items): array
+    {
+        return collect($items)->map(function ($item) {
+            return [
+                'sku' => $item['sku'] ?? '',
+                'invoice_title' => $item['invoice_title'] ?? '',
+                'invoice_amount' => $item['invoice_amount'] ?? null,
+                'invoice_pcs' => $item['invoice_pcs'] ?? null,
+                'invoice_weight' => isset($item['invoice_weight']) && $item['invoice_weight'] !== ''
+                    ? round(((float) $item['invoice_weight']) / 1000, 3)
+                    : null,
+                'sku_code' => $item['sku_code'] ?? '',
+                'hs_code' => $item['hs_code'] ?? '',
+                'transaction_url' => $item['transaction_url'] ?? '',
+                'invoice_currency' => $item['invoice_currency'] ?? 'USD',
+                'invoiceunit_code' => $item['invoiceunit_code'] ?? 'PCS',
+                'origin_country' => $item['origin_country'] ?? 'CN',
+                'invoice_brand' => $item['invoice_brand'] ?? '',
+                'invoice_rule' => $item['invoice_rule'] ?? '',
+                'invoice_taxno' => $item['invoice_taxno'] ?? '',
+                'invoice_material' => $item['invoice_material'] ?? '',
+                'invoice_purpose' => $item['invoice_purpose'] ?? '',
+                'invoice_export_unitprice' => $item['invoice_export_unitprice'] ?? null,
+                'invoice_export_currency' => $item['invoice_export_currency'] ?? 'USD',
+                'invoice_production_sales_suppliers_name' => $item['invoice_production_sales_suppliers_name'] ?? '',
+                'invoice_production_sales_suppliers_credit_code' => $item['invoice_production_sales_suppliers_credit_code'] ?? '',
+                'import_hs_code' => $item['import_hs_code'] ?? '',
+                'invoice_imgurl' => $item['invoice_imgurl'] ?? '',
+            ];
+        })->all();
     }
 
     private function resolveShipProviderCode(Request $request, Order $order, bool $isDbs): string
@@ -679,5 +1653,74 @@ class OrderLogisticsController extends Controller
 
         $templateCode = $order->logistics_template;
         return $this->orderLogisticsService()->resolveProviderCodeByTemplate($templateCode) ?: 'manual';
+    }
+
+    private function buildSz56tOrderOptions(Request $request): array
+    {
+        return [
+            'product_id' => $request->input('product_id'),
+            'weight' => $request->input('weight'),
+            'form' => is_array($request->input('sz56t_form')) ? $request->input('sz56t_form') : [],
+            'invoice_items' => is_array($request->input('sz56t_items')) ? array_values($request->input('sz56t_items')) : [],
+        ];
+    }
+
+    private function validateSz56tOrderOptions(array $options): ?string
+    {
+        if (trim((string) ($options['product_id'] ?? '')) === '') {
+            return '请选择雷翼运输方式';
+        }
+
+        if ((int) ($options['weight'] ?? 0) < 1) {
+            return '请填写总重量';
+        }
+
+        $form = $options['form'] ?? [];
+        $requiredFields = [
+            'consignee_name' => '请填写收件人',
+            'country' => '请填写国家/地区',
+            'consignee_state' => '请填写州/省',
+            'consignee_city' => '请填写城市',
+            'consignee_postcode' => '请填写邮编',
+            'consignee_address' => '请填写详细地址',
+        ];
+
+        foreach ($requiredFields as $field => $message) {
+            if (trim((string) ($form[$field] ?? '')) === '') {
+                return $message;
+            }
+        }
+
+        $telephone = trim((string) ($form['consignee_telephone'] ?? ''));
+        $mobile = trim((string) ($form['consignee_mobile'] ?? ''));
+        if ($telephone === '' && $mobile === '') {
+            return '联系电话和手机号至少填写一个';
+        }
+
+        $items = $options['invoice_items'] ?? [];
+        if (empty($items)) {
+            return '请至少填写一条申报信息';
+        }
+
+        foreach ($items as $index => $item) {
+            $rowNumber = $index + 1;
+            if (trim((string) ($item['invoice_title'] ?? '')) === '') {
+                return '第' . $rowNumber . '条申报信息缺少申报品名';
+            }
+            if ((float) ($item['invoice_amount'] ?? 0) <= 0) {
+                return '第' . $rowNumber . '条申报信息的申报总金额必须大于0';
+            }
+            if ((int) ($item['invoice_pcs'] ?? 0) <= 0) {
+                return '第' . $rowNumber . '条申报信息的数量必须大于0';
+            }
+            if ((float) ($item['invoice_weight'] ?? 0) <= 0) {
+                return '第' . $rowNumber . '条申报信息的单件重量必须大于0';
+            }
+            if (trim((string) ($item['origin_country'] ?? '')) === '') {
+                return '第' . $rowNumber . '条申报信息缺少原产国';
+            }
+        }
+
+        return null;
     }
 }

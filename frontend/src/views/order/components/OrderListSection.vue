@@ -62,6 +62,16 @@
             <div class="meta-line"><span class="label">下单</span>{{ formatDate(order.ae_created_at) }}</div>
             <div class="meta-line"><span class="label">买家</span>{{ order.buyer_name || '-' }}</div>
             <div class="meta-line"><span class="label">状态</span><el-tag :type="getStatusTagType(order.order_display_status)" size="mini">{{ getStatusLabel(order.order_display_status) }}</el-tag></div>
+            <div class="meta-line">
+              <span class="label">送达状态</span>
+              <el-tag
+                v-if="getOrderDeliveryStatusLabel(order) !== '-'"
+                :type="getDeliveryStatusTagType(order.delivery_status || order.deliveryStatus)"
+                effect="dark"
+                size="mini"
+              >{{ getOrderDeliveryStatusLabel(order) }}</el-tag>
+              <span v-else>-</span>
+            </div>
           </div>
 
           <div class="col-logistics cell-block">
@@ -93,7 +103,6 @@
             <div class="meta-line"><span class="label">物流费</span>{{ Number(order.logistics_fee || 0).toFixed(2) }}</div>
             <div class="meta-line"><span class="label">利润</span><span :class="calcProfit(order) >= 0 ? 'text-success' : 'text-danger'">{{ Number(calcProfit(order) || 0).toFixed(2) }}</span></div>
             <div class="meta-line"><span class="label">利润率</span><span :class="calcProfit(order) >= 0 ? 'text-success' : 'text-danger'">{{ calcProfitRate(order) }}%</span></div>
-            <div class="meta-line"><span class="label">人民币利润</span><span :class="calcProfit(order) >= 0 ? 'text-success' : 'text-danger'">{{ calcProfitCny(order) }}</span></div>
           </div>
 
           <div class="col-backend cell-block">
@@ -140,12 +149,38 @@
               @click="$emit('transfer-sheet', order)"
             >打印交接单</el-button>
             <el-button
-              v-if="order.order_display_status === 'WaitSendGoods'"
+              v-if="canShipOrder(order)"
               type="success"
               size="mini"
               @click="$emit('ship', order)"
             >{{ getShipButtonText(order) }}</el-button>
-            <el-button type="warning" size="mini" @click="$emit('mark-ship', order)">更新订单</el-button>
+            <el-button
+              v-if="canMarkDbsInTransit(order)"
+              type="warning"
+              size="mini"
+              @click="$emit('mark-ship', order)"
+            >同步已发货</el-button>
+            <el-button
+              v-if="canMarkDbsReadyForPickup(order)"
+              type="warning"
+              plain
+              size="mini"
+              @click="$emit('mark-ready-for-pickup', order)"
+            >同步准备取货</el-button>
+            <el-button
+              v-if="canMarkDbsDelivered(order)"
+              type="success"
+              plain
+              size="mini"
+              @click="$emit('mark-delivered', order)"
+            >同步已交付</el-button>
+            <el-button
+              v-if="canCancelSz56tWaybill(order)"
+              type="danger"
+              plain
+              size="mini"
+              @click="$emit('cancel-waybill', order)"
+            >取消运单</el-button>
             <el-button type="info" size="mini" @click="$emit('open-comment-dialog', order)">后台更新</el-button>
           </div>
         </div>
@@ -158,15 +193,20 @@
 import {
   calcFee,
   calcProfit,
-  calcProfitCny,
   calcProfitRate,
   calcTotalBack,
+  canCancelSz56tWaybill,
+  canMarkDbsDelivered,
+  canMarkDbsInTransit,
+  canMarkDbsReadyForPickup,
   canCreateTransferSheet,
+  canShipOrder,
   canPrintLabel,
   formatAddress,
   formatDate,
   getBackendStatusLabel,
   getCategoryFromSku,
+  getOrderDeliveryStatusLabel as formatOrderDeliveryStatusLabel,
   getHandoverListStatusLabel,
   getItemLink,
   getLogisticsTemplateLabel,
@@ -206,10 +246,6 @@ export default {
     dictLabelMap: {
       type: Object,
       default: () => ({})
-    },
-    cnyExchangeRate: {
-      type: Number,
-      default: 7.2
     }
   },
   methods: {
@@ -217,7 +253,12 @@ export default {
     calcProfit,
     calcProfitRate,
     calcTotalBack,
+    canCancelSz56tWaybill,
+    canMarkDbsDelivered,
+    canMarkDbsInTransit,
+    canMarkDbsReadyForPickup,
     canCreateTransferSheet,
+    canShipOrder,
     canPrintLabel,
     formatAddress,
     formatDate,
@@ -225,8 +266,24 @@ export default {
     getItemLink,
     getLogisticsTemplateLabel,
     getStatusTagType,
-    calcProfitCny(order) {
-      return calcProfitCny(order, this.cnyExchangeRate)
+    getOrderDeliveryStatusLabel(order) {
+      return formatOrderDeliveryStatusLabel(order, this.dictLabelMap)
+    },
+    getDeliveryStatusTagType(status) {
+      switch (String(status || '')) {
+        case 'Init':
+          return 'warning'
+        case 'PartialShipped':
+          return 'info'
+        case 'Shipped':
+          return ''
+        case 'Delivered':
+          return 'success'
+        case 'Cancelled':
+          return 'danger'
+        default:
+          return 'info'
+      }
     },
     getBackendStatusLabel(status) {
       return getBackendStatusLabel(status, this.dictLabelMap)
@@ -241,7 +298,7 @@ export default {
       return getStatusLabel(status, this.dictLabelMap)
     },
     getShipButtonText(order) {
-      return isDbsLogisticsType(order.logistics_type) ? '实际发货' : 'FBS发货流程'
+      return isDbsLogisticsType(order.logistics_type) ? 'DBS发货' : 'FBS发货'
     }
   }
 }

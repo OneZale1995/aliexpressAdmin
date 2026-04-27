@@ -129,6 +129,9 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     Route::post('/orders/batch-update-backend-status', [OrderController::class, 'batchUpdateBackendStatus']);
     Route::post('/orders/export', [OrderController::class, 'export']);
     Route::post('/orders/ship', [OrderLogisticsController::class, 'ship']);
+    Route::post('/orders/dbs/sync-platform', [OrderLogisticsController::class, 'dbsSyncPlatform']);
+    Route::post('/orders/dbs/ready-for-pickup', [OrderLogisticsController::class, 'dbsReadyForPickup']);
+    Route::post('/orders/dbs/delivered', [OrderLogisticsController::class, 'dbsDelivered']);
     Route::post('/orders/label', [OrderLogisticsController::class, 'printLabel']);
     Route::post('/orders/transfer-sheet', [OrderLogisticsController::class, 'transferSheet']);
     Route::post('/orders/fbs/workflow', [OrderLogisticsController::class, 'fbsWorkflow']);
@@ -141,13 +144,17 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     Route::post('/orders/fbs/handover-list/transfer', [OrderLogisticsController::class, 'fbsTransferHandoverList']);
 
     // 中国邮政物流
+    Route::post('/orders/chinapost/preview', [OrderLogisticsController::class, 'chinaPostPreview']);
     Route::post('/orders/chinapost/create', [OrderLogisticsController::class, 'chinaPostCreateOrder']);
+    Route::post('/orders/chinapost/allocate-barcode', [OrderLogisticsController::class, 'chinaPostAllocateBarcode']);
     Route::post('/orders/chinapost/label', [OrderLogisticsController::class, 'chinaPostLabel']);
     Route::post('/orders/chinapost/cancel', [OrderLogisticsController::class, 'chinaPostCancel']);
 
     // 雷翼/sz56t物流
     Route::post('/orders/sz56t/create', [OrderLogisticsController::class, 'sz56tCreateOrder']);
+    Route::post('/orders/sz56t/products', [OrderLogisticsController::class, 'sz56tProducts']);
     Route::post('/orders/sz56t/label', [OrderLogisticsController::class, 'sz56tLabel']);
     Route::post('/orders/sz56t/mark-shipped', [OrderLogisticsController::class, 'sz56tMarkShipped']);
     Route::post('/orders/sz56t/tracking-number', [OrderLogisticsController::class, 'sz56tGetTrackingNumber']);
+    Route::post('/orders/sz56t/cancel', [OrderLogisticsController::class, 'sz56tCancelOrder']);
 });

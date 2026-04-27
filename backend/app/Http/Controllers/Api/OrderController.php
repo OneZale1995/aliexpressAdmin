@@ -9,7 +9,6 @@ use App\Models\Order;
 use App\Models\OrderSyncTask;
 use App\Models\Shop;
 use App\Models\Team;
-use App\Services\OrderLogisticsService;
 use App\Traits\ApiResponse;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -440,7 +439,7 @@ class OrderController extends Controller
         ]);
 
         try {
-            RunOrderSyncTask::dispatchAfterResponse($task->id);
+            RunOrderSyncTask::dispatch($task->id);
         } catch (\Throwable $e) {
             $task->update([
                 'status' => 'failed',
@@ -511,7 +510,6 @@ class OrderController extends Controller
             'purchase_amount' => 'nullable|numeric|min:0',
             'express_fee' => 'nullable|numeric|min:0',
             'logistics_fee' => 'nullable|numeric|min:0',
-            'logistics_template' => 'nullable|string|max:50',
             'eub_amazon_ratio' => 'nullable|numeric|min:0|max:999.99',
             'eub_base_fee' => 'nullable|numeric|min:0',
             'calculated_logistics_fee' => 'nullable|numeric|min:0',
@@ -543,17 +541,6 @@ class OrderController extends Controller
         ];
 
         $order->update($payload);
-
-        if ($request->has('logistics_template')) {
-            $logisticsService = new OrderLogisticsService();
-            $templateCode = $request->input('logistics_template', $order->logistics_template ?: 'online');
-            $logisticsService->syncPrimary($order, [
-                'logistics_mode' => $order->logistics_type,
-                'template_code' => $templateCode,
-                'provider_code' => $logisticsService->resolveProviderCodeByTemplate($templateCode) ?: data_get($order, 'currentLogistics.provider_code'),
-                'provider_name' => data_get($order, 'currentLogistics.provider_name'),
-            ]);
-        }
 
         $order->load('currentLogistics');
 

@@ -44,8 +44,20 @@ export function shipOrder(data) {
   return request({ url: '/orders/ship', method: 'post', data })
 }
 
+export function syncDbsShipmentToPlatform(data) {
+  return request({ url: '/orders/dbs/sync-platform', method: 'post', data })
+}
+
+export function syncDbsShipmentReadyForPickup(data) {
+  return request({ url: '/orders/dbs/ready-for-pickup', method: 'post', data })
+}
+
+export function syncDbsShipmentDelivered(data) {
+  return request({ url: '/orders/dbs/delivered', method: 'post', data })
+}
+
 export function getOrderLabel(data) {
-  return request({ url: '/orders/label', method: 'post', data })
+  return request({ url: '/orders/label', method: 'post', data, silentError: true })
 }
 
 export function createOrderTransferSheet(data) {
@@ -88,12 +100,16 @@ export function exportOrders(data) {
   return request({ url: '/orders/export', method: 'post', data, responseType: 'blob' })
 }
 
+export function chinaPostPreviewOrder(data) {
+  return request({ url: '/orders/chinapost/preview', method: 'post', data })
+}
+
 export function chinaPostCreateOrder(data) {
   return request({ url: '/orders/chinapost/create', method: 'post', data })
 }
 
 export function chinaPostGetLabel(data) {
-  return request({ url: '/orders/chinapost/label', method: 'post', data })
+  return request({ url: '/orders/chinapost/label', method: 'post', data, silentError: true })
 }
 
 export function chinaPostCancelOrder(data) {
@@ -104,8 +120,12 @@ export function sz56tCreateOrder(data) {
   return request({ url: '/orders/sz56t/create', method: 'post', data })
 }
 
+export function fetchSz56tProductList(data) {
+  return request({ url: '/orders/sz56t/products', method: 'post', data })
+}
+
 export function sz56tGetLabel(data) {
-  return request({ url: '/orders/sz56t/label', method: 'post', data })
+  return request({ url: '/orders/sz56t/label', method: 'post', data, silentError: true })
 }
 
 export function sz56tMarkShipped(data) {
@@ -114,4 +134,8 @@ export function sz56tMarkShipped(data) {
 
 export function sz56tGetTrackingNumber(data) {
   return request({ url: '/orders/sz56t/tracking-number', method: 'post', data })
+}
+
+export function sz56tCancelOrder(data) {
+  return request({ url: '/orders/sz56t/cancel', method: 'post', data })
 }

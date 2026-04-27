@@ -876,7 +876,7 @@ class AliExpressService
         }
 
         $result = $this->requestSellerApi($shop, '/seller-api/v1/handover-list/get-by-filter', [
-            'handover_list_ids' => $handoverListId,
+            'handover_list_ids' => [$handoverListId],
             'page_size' => 1,
             'page_number' => 1,
         ], '查询交接清单失败', [

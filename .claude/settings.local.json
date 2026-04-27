@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(php artisan:*)",
+      "Bash(grep -n 'showError\\\\|this\\\\.$message\\\\.error\\(err' /d/developTools/phpstudy_pro/WWW/aliexpressAdmin/frontend/src/views/order/index.vue)",
+      "Bash(grep -n 'showError\\\\|$message\\\\.error' /d/developTools/phpstudy_pro/WWW/aliexpressAdmin/frontend/src/views/order/index.vue)",
+      "Bash(grep:*)",
+      "Bash(python3:*)",
+      "Bash(node:*)"
+    ]
+  }
+}

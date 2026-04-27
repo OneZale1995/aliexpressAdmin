@@ -55,8 +55,25 @@ export function getLogisticsTypeLabel(type, dictLabelMap) {
   return translateByCode(type, ORDER_DICT_CODE.logisticsType, dictLabelMap)
 }
 
+export function getShipmentStatusLabel(status, dictLabelMap) {
+  return translateByCode(status, ORDER_DICT_CODE.shipmentStatus, dictLabelMap)
+}
+
 export function getLogisticOrderStatusLabel(status, dictLabelMap) {
-  return translateByCode(status, ORDER_DICT_CODE.logisticOrderStatus, dictLabelMap)
+  if (status === undefined || status === null || status === '') return '-'
+
+  const value = String(status)
+  const shipmentDict = dictLabelMap[ORDER_DICT_CODE.shipmentStatus] || {}
+  if (shipmentDict[value]) {
+    return shipmentDict[value]
+  }
+
+  const logisticOrderDict = dictLabelMap[ORDER_DICT_CODE.logisticOrderStatus] || {}
+  if (logisticOrderDict[value]) {
+    return logisticOrderDict[value]
+  }
+
+  return value
 }
 
 export function getHandoverListStatusLabel(status, dictLabelMap) {

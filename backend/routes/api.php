@@ -129,6 +129,9 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     Route::post('/orders/batch-update-backend-status', [OrderController::class, 'batchUpdateBackendStatus']);
     Route::post('/orders/export', [OrderController::class, 'export']);
     Route::post('/orders/ship', [OrderLogisticsController::class, 'ship']);
+    Route::post('/orders/ship/fbs', [OrderLogisticsController::class, 'shipFbs']);
+    Route::post('/orders/ship/dbs/chinapost', [OrderLogisticsController::class, 'shipDbsChinaPost']);
+    Route::post('/orders/ship/dbs/leiyi', [OrderLogisticsController::class, 'shipDbsLeiyi']);
     Route::post('/orders/dbs/sync-platform', [OrderLogisticsController::class, 'dbsSyncPlatform']);
     Route::post('/orders/dbs/ready-for-pickup', [OrderLogisticsController::class, 'dbsReadyForPickup']);
     Route::post('/orders/dbs/delivered', [OrderLogisticsController::class, 'dbsDelivered']);
@@ -149,6 +152,10 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     Route::post('/orders/chinapost/allocate-barcode', [OrderLogisticsController::class, 'chinaPostAllocateBarcode']);
     Route::post('/orders/chinapost/label', [OrderLogisticsController::class, 'chinaPostLabel']);
     Route::post('/orders/chinapost/cancel', [OrderLogisticsController::class, 'chinaPostCancel']);
+    Route::post('/orders/address-books/list', [OrderLogisticsController::class, 'addressBookList']);
+    Route::post('/orders/address-books/save', [OrderLogisticsController::class, 'addressBookSave']);
+    Route::post('/orders/address-books/delete', [OrderLogisticsController::class, 'addressBookDelete']);
+    Route::post('/orders/address-books/region-options', [OrderLogisticsController::class, 'addressBookRegionOptions']);
 
     // 雷翼/sz56t物流
     Route::post('/orders/sz56t/create', [OrderLogisticsController::class, 'sz56tCreateOrder']);

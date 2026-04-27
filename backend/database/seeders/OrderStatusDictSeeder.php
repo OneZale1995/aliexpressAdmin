@@ -117,6 +117,20 @@ class OrderStatusDictSeeder extends Seeder
                     ['Cancelled', '已取消'],
                 ],
             ],
+            'ae_shipment_status' => [
+                'name' => '速卖通-发货单状态',
+                'items' => [
+                    ['NEW', '新建（发货创建中）'],
+                    ['AWAITING_ADDING_TO_HANDOVER', '待添加到交接单'],
+                    ['AWAITING_REPORT_AS_SHIP', '等待发货确认'],
+                    ['DELIVERING', '交付中'],
+                    ['DELIVERED', '已交付'],
+                    ['RETURNING_TO_SENDER', '退回发件人中'],
+                    ['RETURNED_TO_SENDER', '已退回发件人'],
+                    ['CANCELLED', '已取消'],
+                    ['WITH_ERRORS', '异常'],
+                ],
+            ],
             'ae_handover_list_status' => [
                 'name' => '速卖通-交接清单状态',
                 'items' => [

@@ -51,7 +51,7 @@ class OrderController extends Controller
             $query->where('shop_id', $request->shop_id);
         }
         if ($request->filled('ae_order_id')) {
-            $query->where('ae_order_id', $request->ae_order_id);
+            $query->where('ae_order_id', 'like', '%' . $request->ae_order_id . '%');
         }
         if ($request->filled('tracking_number')) {
             $this->applyTrackingNumberFilter($query, $request->tracking_number);
@@ -111,6 +111,11 @@ class OrderController extends Controller
         if ($request->filled('issue_status')) {
             $query->whereHas('items', function ($q) use ($request) {
                 $q->where('issue_status', $request->issue_status);
+            });
+        }
+        if ($request->filled('shipment_status')) {
+            $query->whereHas('currentLogistics', function ($q) use ($request) {
+                $q->where('logistic_status', $request->shipment_status);
             });
         }
         if ($request->filled('backend_status')) {
@@ -603,7 +608,7 @@ class OrderController extends Controller
         }
         if ($request->filled('ae_order_id')) {
             $query->where('ae_order_id', $request->ae_order_id);
-        }
+        } 
         if ($request->filled('tracking_number')) {
             $this->applyTrackingNumberFilter($query, $request->tracking_number);
         }

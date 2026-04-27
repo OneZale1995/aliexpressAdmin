@@ -58,7 +58,7 @@
           <div class="col-basic cell-block">
             <div class="meta-line"><span class="label">店铺名称</span><span class="clip-text">{{ order.shop ? order.shop.name : '-' }}</span></div>
             <div class="meta-line"><span class="label">店铺邮箱</span><span class="clip-text">{{ order.shop ? order.shop.email : '-' }}</span></div>
-            <div class="meta-line"><span class="label">订单号</span>{{ order.ae_order_id }}</div>
+            <div class="meta-line"><span class="label">订单号</span><span class="order-id">{{ order.ae_order_id }}</span></div>
             <div class="meta-line"><span class="label">下单</span>{{ formatDate(order.ae_created_at) }}</div>
             <div class="meta-line"><span class="label">买家</span>{{ order.buyer_name || '-' }}</div>
             <div class="meta-line"><span class="label">状态</span><el-tag :type="getStatusTagType(order.order_display_status)" size="mini">{{ getStatusLabel(order.order_display_status) }}</el-tag></div>
@@ -93,6 +93,7 @@
             </div>
             <div class="meta-line"><span class="label">交接单ID</span>{{ order.handover_list_id || '-' }}</div>
             <div class="meta-line"><span class="label">交接状态</span>{{ getHandoverListStatusLabel(order.handover_list_status) }}</div>
+            <div class="meta-line"><span class="label">发货单状态</span>{{ getShipmentStatusLabel((order.current_logistics || {}).logistic_status) }}</div>
           </div>
 
           <div class="col-amount cell-block">
@@ -210,6 +211,7 @@ import {
   getHandoverListStatusLabel,
   getItemLink,
   getLogisticsTemplateLabel,
+  getShipmentStatusLabel,
   getLogisticsTypeLabel,
   getStatusLabel,
   getStatusTagType,
@@ -290,6 +292,9 @@ export default {
     },
     getHandoverListStatusLabel(status) {
       return getHandoverListStatusLabel(status, this.dictLabelMap)
+    },
+    getShipmentStatusLabel(status) {
+      return getShipmentStatusLabel(status, this.dictLabelMap)
     },
     getLogisticsTypeLabel(type) {
       return getLogisticsTypeLabel(type, this.dictLabelMap)
@@ -512,6 +517,14 @@ export default {
 .strong {
   font-weight: 700;
   color: #303133;
+}
+
+.order-id {
+  font-weight: 700;
+  font-size: 13px;
+  color: #e6a23c;
+  letter-spacing: 0.5px;
+  user-select: all;
 }
 
 @media (max-width: 1400px) {

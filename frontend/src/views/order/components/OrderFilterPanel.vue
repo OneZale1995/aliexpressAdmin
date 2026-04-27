@@ -34,9 +34,6 @@
           <el-form-item label="店铺关键词">
             <el-input v-model="listQuery.shop_keyword" placeholder="店铺名/邮箱" style="width: 180px;" />
           </el-form-item>
-          <el-form-item label="国内单号">
-            <el-input v-model="listQuery.ae_order_id" placeholder="国内单号" style="width: 180px;" />
-          </el-form-item>
           <el-form-item label="国际单号">
             <el-input v-model="listQuery.tracking_number" placeholder="国际单号/运单号" style="width: 180px;" />
           </el-form-item>
@@ -112,6 +109,11 @@
           <el-form-item label="争议">
             <el-select v-model="listQuery.issue_status" placeholder="争议状态" clearable style="width: 140px;">
               <el-option v-for="item in issueStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="发货单状态">
+            <el-select v-model="listQuery.shipment_status" placeholder="发货单状态" clearable style="width: 180px;">
+                <el-option v-for="item in shipmentStatusOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
           <el-form-item>
@@ -193,6 +195,10 @@ export default {
       default: () => []
     },
     issueStatusOptions: {
+      type: Array,
+      default: () => []
+    },
+    shipmentStatusOptions: {
       type: Array,
       default: () => []
     },

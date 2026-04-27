@@ -129,6 +129,9 @@ import {
   readyFbsHandoverForPickup,
   removeFbsLogisticOrdersFromHandover,
   shipOrder,
+  shipFbsOrder,
+  shipDbsChinaPostOrder,
+  shipDbsLeiyiOrder,
   syncDbsShipmentDelivered,
   syncDbsShipmentReadyForPickup,
   syncDbsShipmentToPlatform,
@@ -282,6 +285,11 @@ export default {
     this.stopSyncPolling()
   },
   methods: {
+    // 统一错误提示：拦截器已弹过的不重复弹
+    showError(err, fallback) {
+      if (err && err.alreadyNotified) return
+      this.$message.error((err && err.message) || fallback || '操作失败')
+    },
     loadShops() {
       fetchShopList({ page: 1, limit: 200 }).then(res => {
         this.shopOptions = res.data.items || []
@@ -541,7 +549,7 @@ export default {
         window.URL.revokeObjectURL(url)
         this.$message.success('导出成功')
       }).catch(err => {
-        this.$message.error(err.message || '导出失败')
+        this.showError(err, '导出失败')
       }).finally(() => {
         this.exporting = false
       })
@@ -655,7 +663,7 @@ export default {
         this.$message.warning(res.message || '交接单已创建，但未返回可打印链接')
       }).catch(err => {
         this.closePendingPrintWindow(printWindow)
-        this.$message.error(err.message || '交接单处理失败')
+        this.showError(err, '交接单处理失败')
       }).finally(() => {
         this.transferSheetLoadingId = null
       })
@@ -698,7 +706,7 @@ export default {
             this.$message.warning(res.message || '面单暂不可用')
           } catch (err) {
             this.closePendingPrintWindow(printWindow)
-            this.$message.error(err.message || '面单获取失败')
+            this.showError(err, '面单获取失败')
           }
           return
         }
@@ -897,7 +905,7 @@ export default {
       fetchFbsWorkflow({ id: this.shipForm.id }).then(res => {
         this.applyFbsWorkflow(res.data || {})
       }).catch(err => {
-        this.$message.error(err.message || '获取 FBS 工作流失败')
+        this.showError(err, '获取 FBS 工作流失败')
       }).finally(() => {
         this.shipForm.workflow_loading = false
       })
@@ -954,7 +962,7 @@ export default {
           this.shipForm.weight = Number(logisticsInterface.weight || 0)
         }
       }).catch(err => {
-        this.$message.error(err.message || '获取中国邮政请求参数失败')
+        this.showError(err, '获取中国邮政请求参数失败')
       })
     },
     parseChinaPostRequest() {
@@ -1059,7 +1067,7 @@ export default {
           this.setSz56tProductCache(items)
         }
       }).catch(err => {
-        this.$message.error(err.message || '获取雷翼运输方式失败')
+        this.showError(err, '获取雷翼运输方式失败')
       }).finally(() => {
         this.sz56tProductLoading = false
       })
@@ -1083,6 +1091,7 @@ export default {
         weight: Number(this.shipForm.weight || 0),
         sz56t_form: {
           ...form,
+          consignee_address: String(form.consignee_address || '').slice(0, 500),
           order_piece: Number(form.order_piece || 1),
           length: firstVolume.volume_length || null,
           width: firstVolume.volume_width || null,
@@ -1221,7 +1230,7 @@ export default {
         this.applyFbsWorkflow(res.data && res.data.workflow ? res.data.workflow : null)
         this.shipForm.current_step = 1
       }).catch(err => {
-        this.$message.error(err.message || 'FBS 发货单创建失败')
+        this.showError(err, 'FBS 发货单创建失败')
       }).finally(() => {
         this.shipping = false
       })
@@ -1242,7 +1251,7 @@ export default {
         this.applyFbsWorkflow(res.data && res.data.workflow ? res.data.workflow : null)
         this.shipForm.current_step = 2
       }).catch(err => {
-        this.$message.error(err.message || '交接清单创建失败')
+        this.showError(err, '交接清单创建失败')
       }).finally(() => {
         this.shipping = false
       })
@@ -1263,7 +1272,7 @@ export default {
         this.applyFbsWorkflow(res.data && res.data.workflow ? res.data.workflow : null)
         this.shipForm.current_step = 2
       }).catch(err => {
-        this.$message.error(err.message || '追加到交接清单失败')
+        this.showError(err, '追加到交接清单失败')
       }).finally(() => {
         this.shipping = false
       })
@@ -1284,7 +1293,7 @@ export default {
         this.applyFbsWorkflow(res.data && res.data.workflow ? res.data.workflow : null)
         this.shipForm.current_step = 1
       }).catch(err => {
-        this.$message.error(err.message || '移除交接清单失败')
+        this.showError(err, '移除交接清单失败')
       }).finally(() => {
         this.shipping = false
       })
@@ -1313,7 +1322,7 @@ export default {
         this.$message.warning(res.message || '发货标签暂不可用')
       } catch (err) {
         this.closePendingPrintWindow(printWindow)
-        this.$message.error(err.message || '发货标签打印失败')
+        this.showError(err, '发货标签打印失败')
       } finally {
         this.closePrintLabelLoading(loading)
       }
@@ -1343,7 +1352,7 @@ export default {
         this.$message.warning(res.message || '暂未获取到交接清单打印链接')
       }).catch(err => {
         this.closePendingPrintWindow(printWindow)
-        this.$message.error(err.message || '交接清单打印失败')
+        this.showError(err, '交接清单打印失败')
       })
     },
     markCurrentFbsReadyForPickup() {
@@ -1364,7 +1373,7 @@ export default {
         this.applyFbsWorkflow(res.data && res.data.workflow ? res.data.workflow : null)
         this.$message.success(res.message || '已标记待揽收')
       }).catch(err => {
-        this.$message.error(err.message || '标记待揽收失败')
+        this.showError(err, '标记待揽收失败')
       }).finally(() => {
         this.shipping = false
       })
@@ -1387,7 +1396,7 @@ export default {
         }
         this.$message.success(res.message || '交接单状态已更新')
       }).catch(err => {
-        this.$message.error(err.message || '交接单状态更新失败')
+        this.showError(err, '交接单状态更新失败')
       }).finally(() => {
         this.shipping = false
       })
@@ -1411,7 +1420,7 @@ export default {
           applyChinaPostCreateResult(target, waybillNo)
         }
       }).catch(err => {
-        this.$message.error(err.message || '邮政下单失败')
+        this.showError(err, '邮政下单失败')
       }).finally(() => {
         this.shipping = false
       })
@@ -1438,56 +1447,108 @@ export default {
         if (data.order_id || data.tracking_number || (target && target.sz56t_order_id)) {
           const labelResult = await this.openSz56tLabel(this.shipForm.id)
           if (!labelResult.ok) {
-            this.$message.warning(labelResult.message || '雷翼订单已创建，但面单暂不可用')
+            console.warn('雷翼面单暂不可用:', labelResult.message)
           }
         }
         if (data.is_delay) {
           this.$message.info('单号延迟获取，稍后可点击"获取跟踪号"')
         }
       }).catch(err => {
-        this.$message.error(err.message || '雷翼下单失败')
+        this.showError(err, '雷翼下单失败')
       }).finally(() => {
         this.shipping = false
       })
     },
     submitShip() {
-      const shipProvider = ['chinapost', 'leiyi'].includes(this.shipForm.ship_provider)
-        ? this.shipForm.ship_provider
-        : 'chinapost'
-      const requiresChinaPostCreate = shipProvider === 'chinapost' && !String(this.shipForm.track_number || '').trim()
-      const chinaPostPayload = requiresChinaPostCreate ? this.parseChinaPostRequest() : null
+      const order = this.getCurrentShipOrder()
+      const isDbs = order && String(order.logistics_type || '').toUpperCase() === 'DBS'
 
-      if (shipProvider !== this.shipForm.ship_provider) {
-        this.shipForm.ship_provider = shipProvider
-      }
+      if (isDbs) {
+        const shipProvider = ['chinapost', 'leiyi'].includes(this.shipForm.ship_provider)
+          ? this.shipForm.ship_provider
+          : 'chinapost'
 
-      if (shipProvider === 'leiyi' && this.canCancelCurrentShipWaybill) {
-        this.$message.info('当前雷翼订单已创建，可直接取消订单或关闭弹窗')
-        return
-      }
+        if (shipProvider !== this.shipForm.ship_provider) {
+          this.shipForm.ship_provider = shipProvider
+        }
 
-      if (shipProvider === 'leiyi') {
-        const validationMessage = this.validateSz56tPayload()
-        if (validationMessage) {
-          this.$message.warning(validationMessage)
+        if (shipProvider === 'leiyi') {
+          if (this.canCancelCurrentShipWaybill) {
+            this.$message.info('当前雷翼订单已创建，可直接取消订单或关闭弹窗')
+            return
+          }
+          const validationMessage = this.validateSz56tPayload()
+          if (validationMessage) {
+            this.$message.warning(validationMessage)
+            return
+          }
+          this.shipping = true
+          const payload = {
+            id: this.shipForm.id,
+            track_number: this.shipForm.track_number,
+            ...this.buildSz56tPayload()
+          }
+          shipDbsLeiyiOrder(payload).then(async res => {
+            this.$message.success(res.message || 'DBS 雷翼发货已记录')
+            const target = this.list.find(o => o.id === this.shipForm.id)
+            const resultData = res.data || {}
+            applyShipResult(target, resultData, this.shipForm.track_number, 'leiyi')
+            if (resultData.tracking_number) {
+              this.shipForm.track_number = resultData.tracking_number
+            }
+            const providerResult = resultData.provider_result || {}
+            if (providerResult.order_id || resultData.tracking_number || (target && target.sz56t_order_id)) {
+              const labelResult = await this.openSz56tLabel(this.shipForm.id)
+              if (!labelResult.ok) {
+                console.warn('雷翼面单暂不可用:', labelResult.message)
+              }
+            }
+          }).catch(err => {
+            this.showError(err, 'DBS 雷翼发货失败')
+          }).finally(() => {
+            this.shipping = false
+          })
           return
         }
-      }
 
-      if (requiresChinaPostCreate && !chinaPostPayload) {
+        // DBS ChinaPost
+        const requiresChinaPostCreate = !String(this.shipForm.track_number || '').trim()
+        const chinaPostPayload = requiresChinaPostCreate ? this.parseChinaPostRequest() : null
+        if (requiresChinaPostCreate && !chinaPostPayload) {
+          return
+        }
+        this.shipping = true
+        const payload = {
+          id: this.shipForm.id,
+          track_number: this.shipForm.track_number,
+          biz_product_no: this.shipForm.biz_product_no,
+          weight: this.shipForm.weight
+        }
+        if (chinaPostPayload) {
+          Object.assign(payload, chinaPostPayload)
+        }
+        shipDbsChinaPostOrder(payload).then(res => {
+          this.$message.success(res.message || 'DBS 邮政发货已记录')
+          const target = this.list.find(o => o.id === this.shipForm.id)
+          const resultData = res.data || {}
+          applyShipResult(target, resultData, this.shipForm.track_number, 'chinapost')
+          if (resultData.tracking_number) {
+            this.shipForm.track_number = resultData.tracking_number
+          }
+        }).catch(err => {
+          this.showError(err, 'DBS 邮政发货失败')
+        }).finally(() => {
+          this.shipping = false
+        })
         return
       }
 
+      // FBS
       this.shipping = true
       const payload = {
         id: this.shipForm.id,
         track_number: this.shipForm.track_number,
         logistic_method: this.shipForm.logistic_method,
-        ship_provider: shipProvider,
-        provider_name: this.shipForm.provider_name,
-        biz_product_no: this.shipForm.biz_product_no,
-        product_id: this.shipForm.product_id,
-        weight: this.shipForm.weight,
         total_length: this.shipForm.total_length,
         total_width: this.shipForm.total_width,
         total_height: this.shipForm.total_height,
@@ -1495,40 +1556,17 @@ export default {
         undeliverable_option: this.shipForm.undeliverable_option,
         danger_type: this.shipForm.danger_type
       }
-
-      if (chinaPostPayload) {
-        Object.assign(payload, chinaPostPayload)
-      }
-
-      if (shipProvider === 'leiyi') {
-        Object.assign(payload, this.buildSz56tPayload())
-      }
-
-      shipOrder(payload).then(async res => {
+      shipFbsOrder(payload).then(async res => {
         this.$message.success(res.message || '发货成功')
-        const target = this.list.find(order => order.id === this.shipForm.id)
+        const target = this.list.find(o => o.id === this.shipForm.id)
         const resultData = res.data || {}
-        applyShipResult(target, resultData, this.shipForm.track_number, shipProvider)
-
+        applyShipResult(target, resultData, this.shipForm.track_number, 'fbs')
         if (resultData.tracking_number) {
           this.shipForm.track_number = resultData.tracking_number
         }
-
-        if (shipProvider === 'leiyi') {
-          const providerResult = resultData.provider_result || {}
-          if (providerResult.order_id || resultData.tracking_number || (target && target.sz56t_order_id)) {
-            const labelResult = await this.openSz56tLabel(this.shipForm.id)
-            if (!labelResult.ok) {
-              this.$message.warning(labelResult.message || '雷翼订单已创建，但面单暂不可用')
-            }
-          }
-
-          return
-        }
-
         this.shipDialogVisible = false
       }).catch(err => {
-        this.$message.error(err.message || '发货失败')
+        this.showError(err, '发货失败')
       }).finally(() => {
         this.shipping = false
       })
@@ -1562,8 +1600,7 @@ export default {
           if (err === 'cancel' || err === 'close') {
             return
           }
-
-          this.$message.error((err && err.message) || errorMessage || '平台状态同步失败')
+          this.showError(err, errorMessage || '平台状态同步失败')
         })
         .finally(() => {
           this.shipping = false

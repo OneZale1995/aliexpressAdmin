@@ -4,6 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Models\OrderAddressBook;
+use App\Models\Shop;
+use App\Models\Team;
 use App\Services\AliExpressService;
 use App\Services\ChinaPostService;
 use App\Services\OrderFbsWorkflowService;
@@ -31,18 +34,18 @@ class OrderLogisticsController extends Controller
     {
         $request->validate([
             'id' => 'required|exists:orders,id',
-            'track_number' => 'nullable|string|max:100',
-            'logistic_method' => 'nullable|string|max:100',
-            'ship_provider' => 'nullable|string|max:50',
-            'provider_name' => 'nullable|string|max:100',
-            'biz_product_no' => 'nullable|string|max:10',
-            'product_type' => 'nullable|string|max:32',
-            'api_code' => 'nullable|string|max:16',
-            'sender_no' => 'nullable|string|max:64',
-            'msg_type' => 'nullable|string|max:10',
-            'version' => 'nullable|string|max:20',
-            'user_code' => 'nullable|string|max:64',
-            'product_id' => 'nullable|string|max:50',
+            'track_number' => 'nullable|string',
+            'logistic_method' => 'nullable|string',
+            'ship_provider' => 'nullable|string',
+            'provider_name' => 'nullable|string',
+            'biz_product_no' => 'nullable|string',
+            'product_type' => 'nullable|string',
+            'api_code' => 'nullable|string',
+            'sender_no' => 'nullable|string',
+            'msg_type' => 'nullable|string',
+            'version' => 'nullable|string',
+            'user_code' => 'nullable|string',
+            'product_id' => 'nullable|string',
             'weight' => 'nullable|integer|min:1|max:50000',
             'logistics_interface' => 'nullable|array',
             'sz56t_form' => 'nullable|array',
@@ -50,23 +53,23 @@ class OrderLogisticsController extends Controller
             'sz56t_form.length' => 'nullable|numeric|min:1|max:200',
             'sz56t_form.width' => 'nullable|numeric|min:1|max:200',
             'sz56t_form.height' => 'nullable|numeric|min:1|max:200',
-            'sz56t_form.consignee_name' => 'nullable|string|max:100',
-            'sz56t_form.consignee_address' => 'nullable|string|max:500',
-            'sz56t_form.consignee_telephone' => 'nullable|string|max:50',
-            'sz56t_form.consignee_mobile' => 'nullable|string|max:50',
-            'sz56t_form.consignee_city' => 'nullable|string|max:100',
-            'sz56t_form.consignee_state' => 'nullable|string|max:100',
-            'sz56t_form.consignee_postcode' => 'nullable|string|max:50',
-            'sz56t_form.country' => 'nullable|string|max:20',
-            'sz56t_form.consignee_email' => 'nullable|string|max:100',
+            'sz56t_form.consignee_name' => 'nullable|string',
+            'sz56t_form.consignee_address' => 'nullable|string',
+            'sz56t_form.consignee_telephone' => 'nullable|string',
+            'sz56t_form.consignee_mobile' => 'nullable|string',
+            'sz56t_form.consignee_city' => 'nullable|string',
+            'sz56t_form.consignee_state' => 'nullable|string',
+            'sz56t_form.consignee_postcode' => 'nullable|string',
+            'sz56t_form.country' => 'nullable|string',
+            'sz56t_form.consignee_email' => 'nullable|string',
             'sz56t_items' => 'nullable|array',
-            'sz56t_items.*.invoice_title' => 'nullable|string|max:100',
+            'sz56t_items.*.invoice_title' => 'nullable|string',
             'sz56t_items.*.invoice_amount' => 'nullable|numeric|min:0.01|max:999999',
             'sz56t_items.*.invoice_pcs' => 'nullable|integer|min:1|max:9999',
             'sz56t_items.*.invoice_weight' => 'nullable|numeric|min:0.01|max:50000',
-            'sz56t_items.*.sku_code' => 'nullable|string|max:100',
-            'sz56t_items.*.invoice_currency' => 'nullable|string|max:10',
-            'sz56t_items.*.origin_country' => 'nullable|string|max:20',
+            'sz56t_items.*.sku_code' => 'nullable|string',
+            'sz56t_items.*.invoice_currency' => 'nullable|string',
+            'sz56t_items.*.origin_country' => 'nullable|string',
             'use_mock' => 'nullable|boolean',
             'total_length' => 'nullable|integer|min:1|max:200',
             'total_width' => 'nullable|integer|min:1|max:200',
@@ -163,6 +166,234 @@ class OrderLogisticsController extends Controller
             'ae_error' => $result['message'],
             'mode' => $isDbs ? 'DBS_offline' : 'FBS_online',
         ], '本地已记录发货，速卖通接口返回: ' . $result['message']);
+    }
+
+    /**
+     * FBS 发货（直接调用速卖通 mark-ship）
+     */
+    public function shipFbs(Request $request)
+    {
+        $request->validate([
+            'id' => 'required|exists:orders,id',
+            'track_number' => 'nullable|string',
+            'logistic_method' => 'nullable|string',
+            'total_length' => 'nullable|integer|min:1|max:200',
+            'total_width' => 'nullable|integer|min:1|max:200',
+            'total_height' => 'nullable|integer|min:1|max:200',
+            'total_weight' => 'nullable|numeric|min:0.01|max:50',
+            'undeliverable_option' => 'nullable|in:Recycling,Return',
+            'danger_type' => 'nullable|in:General,DangerLiquids,ContainsBattery,SeparateBattery',
+            'use_mock' => 'nullable|boolean',
+        ]);
+
+        $order = Order::with(['shop', 'items', 'currentLogistics'])->findOrFail($request->id);
+        if ($response = $this->ensureOrderHasShop($order)) {
+            return $response;
+        }
+        if ($response = $this->ensureFbsOrder($order)) {
+            return $response;
+        }
+
+        $useMock = (bool) $request->boolean('use_mock');
+        $service = new AliExpressService();
+        $result = $service->shipFbs($order->shop, $order, [
+            'track_number' => $request->track_number,
+            'logistic_method' => $request->input('logistic_method', ''),
+            'use_mock' => $useMock,
+            'total_length' => $request->input('total_length'),
+            'total_width' => $request->input('total_width'),
+            'total_height' => $request->input('total_height'),
+            'total_weight' => $request->input('total_weight'),
+            'undeliverable_option' => $request->input('undeliverable_option'),
+            'danger_type' => $request->input('danger_type'),
+        ]);
+
+        $trackingNumber = $request->track_number
+            ?: data_get($result, 'data.tracking_number')
+            ?: data_get($result, 'data.mark_ship.tracking_number')
+            ?: $order->tracking_number;
+
+        $this->orderLogisticsService()->syncTracking($order, $trackingNumber, [
+            'logistics_mode' => 'FBS',
+            'provider_code' => 'aliexpress',
+            'provider_name' => 'AliExpress',
+        ]);
+
+        $order->update([
+            'tracking_number' => $trackingNumber,
+            'actual_ship_at' => now(),
+            'marked_ship_at' => $order->marked_ship_at ?? now(),
+        ]);
+
+        if ($result['success']) {
+            return $this->success([
+                'ae_result' => $result['data'],
+                'tracking_number' => $trackingNumber,
+                'mode' => 'FBS_online',
+            ], '发货成功');
+        }
+
+        return $this->success([
+            'ae_result' => $result['data'] ?? null,
+            'tracking_number' => $trackingNumber,
+            'ae_error' => $result['message'],
+            'mode' => 'FBS_online',
+        ], '本地已记录发货，速卖通接口返回: ' . $result['message']);
+    }
+
+    /**
+     * DBS 中国邮政发货（本地记录，不自动同步速卖通）
+     */
+    public function shipDbsChinaPost(Request $request)
+    {
+        $request->validate([
+            'id' => 'required|exists:orders,id',
+            'track_number' => 'nullable|string',
+            'biz_product_no' => 'nullable|string',
+            'product_type' => 'nullable|string',
+            'api_code' => 'nullable|string',
+            'sender_no' => 'nullable|string',
+            'msg_type' => 'nullable|string',
+            'version' => 'nullable|string',
+            'user_code' => 'nullable|string',
+            'weight' => 'nullable|integer|min:1|max:50000',
+            'logistics_interface' => 'nullable|array',
+        ]);
+
+        $order = Order::with(['shop', 'items', 'currentLogistics'])->findOrFail($request->id);
+        if ($response = $this->ensureOrderHasShop($order)) {
+            return $response;
+        }
+
+        if (strtoupper($order->logistics_type ?? '') !== 'DBS') {
+            return $this->error('当前订单不是 DBS 模式');
+        }
+
+        $trackingNumber = trim((string) $request->input('track_number', ''));
+
+        if ($trackingNumber === '') {
+            $result = $this->createChinaPostOrder($order, [
+                'biz_product_no' => $request->input('biz_product_no', '019'),
+                'product_type' => $request->input('product_type', 'E邮宝'),
+                'api_code' => $request->input('api_code'),
+                'sender_no' => $request->input('sender_no'),
+                'msg_type' => $request->input('msg_type'),
+                'version' => $request->input('version'),
+                'user_code' => $request->input('user_code'),
+                'weight' => $request->input('weight'),
+                'logistics_interface' => $request->input('logistics_interface'),
+            ]);
+
+            if (!$result['success']) {
+                return $this->error($result['message'] ?? 'DBS 邮政发货失败', 40000, $result['provider_result'] ?? []);
+            }
+
+            $trackingNumber = $result['tracking_number'];
+        } else {
+            $this->orderLogisticsService()->syncPrimary($order, [
+                'logistics_mode' => 'DBS',
+                'provider_code' => 'chinapost',
+                'provider_name' => 'China Post',
+                'tracking_number' => $trackingNumber,
+                'logistic_status' => 'created',
+            ]);
+        }
+
+        $order->update([
+            'tracking_number' => $trackingNumber,
+            'actual_ship_at' => now(),
+        ]);
+
+        return $this->success([
+            'tracking_number' => $trackingNumber,
+            'actual_ship_at' => optional($order->actual_ship_at)->toDateTimeString(),
+            'platform_sync_required' => true,
+            'mode' => 'DBS_chinapost_local',
+        ], 'DBS 邮政本地发货已记录，请手动点击按钮发送到速卖通');
+    }
+
+    /**
+     * DBS 雷翼发货（本地记录，不自动同步速卖通）
+     */
+    public function shipDbsLeiyi(Request $request)
+    {
+        $request->validate([
+            'id' => 'required|exists:orders,id',
+            'track_number' => 'nullable|string',
+            'product_id' => 'nullable|string',
+            'weight' => 'nullable|integer|min:1',
+            'sz56t_form' => 'nullable|array',
+            'sz56t_form.order_returnsign' => 'nullable|in:Y,N',
+            'sz56t_form.length' => 'nullable|numeric|min:1|max:200',
+            'sz56t_form.width' => 'nullable|numeric|min:1|max:200',
+            'sz56t_form.height' => 'nullable|numeric|min:1|max:200',
+            'sz56t_form.consignee_name' => 'nullable|string',
+            'sz56t_form.consignee_address' => 'nullable|string',
+            'sz56t_form.consignee_telephone' => 'nullable|string',
+            'sz56t_form.consignee_mobile' => 'nullable|string',
+            'sz56t_form.consignee_city' => 'nullable|string',
+            'sz56t_form.consignee_state' => 'nullable|string',
+            'sz56t_form.consignee_postcode' => 'nullable|string',
+            'sz56t_form.country' => 'nullable|string',
+            'sz56t_form.consignee_email' => 'nullable|string',
+            'sz56t_items' => 'nullable|array',
+            'sz56t_items.*.invoice_title' => 'nullable|string',
+            'sz56t_items.*.invoice_amount' => 'nullable|numeric|min:0.01|max:999999',
+            'sz56t_items.*.invoice_pcs' => 'nullable|integer|min:1|max:9999',
+            'sz56t_items.*.invoice_weight' => 'nullable|numeric|min:0.01|max:50000',
+            'sz56t_items.*.sku_code' => 'nullable|string',
+            'sz56t_items.*.invoice_currency' => 'nullable|string',
+            'sz56t_items.*.origin_country' => 'nullable|string',
+        ]);
+
+        $order = Order::with(['shop', 'items', 'currentLogistics'])->findOrFail($request->id);
+        if ($response = $this->ensureOrderHasShop($order)) {
+            return $response;
+        }
+
+        if (strtoupper($order->logistics_type ?? '') !== 'DBS') {
+            return $this->error('当前订单不是 DBS 模式');
+        }
+
+        $trackingNumber = trim((string) $request->input('track_number', ''));
+
+        if ($trackingNumber === '') {
+            $options = $this->buildSz56tOrderOptions($request);
+            if ($message = $this->validateSz56tOrderOptions($options)) {
+                return $this->error($message);
+            }
+
+            $result = $this->createSz56tOrder($order, $options);
+
+            if (!$result['success']) {
+                return $this->error($result['message'] ?? 'DBS 雷翼发货失败', 40000, $result['provider_result'] ?? []);
+            }
+
+            $trackingNumber = $result['tracking_number'] ?? '';
+            $providerResult = $result['provider_result'] ?? null;
+        } else {
+            $this->orderLogisticsService()->syncPrimary($order, [
+                'logistics_mode' => 'DBS',
+                'provider_code' => 'sz56t',
+                'provider_name' => 'SZ56T',
+                'tracking_number' => $trackingNumber,
+                'logistic_status' => 'created',
+            ]);
+            $providerResult = null;
+        }
+
+        $order->update([
+            'tracking_number' => $trackingNumber ?: $order->tracking_number,
+            'actual_ship_at' => now(),
+        ]);
+
+        return $this->success([
+            'tracking_number' => $trackingNumber,
+            'actual_ship_at' => optional($order->actual_ship_at)->toDateTimeString(),
+            'provider_result' => $providerResult,
+            'platform_sync_required' => true,
+            'mode' => 'DBS_leiyi_local',
+        ], 'DBS 雷翼本地发货已记录，请手动点击按钮发送到速卖通');
     }
 
     /**
@@ -368,13 +599,13 @@ class OrderLogisticsController extends Controller
     {
         $request->validate([
             'id' => 'required|exists:orders,id',
-            'biz_product_no' => 'nullable|string|max:32',
-            'product_type' => 'nullable|string|max:32',
-            'api_code' => 'nullable|string|max:16',
-            'sender_no' => 'nullable|string|max:64',
-            'msg_type' => 'nullable|string|max:10',
-            'version' => 'nullable|string|max:20',
-            'user_code' => 'nullable|string|max:64',
+            'biz_product_no' => 'nullable|string',
+            'product_type' => 'nullable|string',
+            'api_code' => 'nullable|string',
+            'sender_no' => 'nullable|string',
+            'msg_type' => 'nullable|string',
+            'version' => 'nullable|string',
+            'user_code' => 'nullable|string',
             'weight' => 'nullable|integer|min:1',
             'logistics_interface' => 'nullable|array',
         ]);
@@ -400,13 +631,13 @@ class OrderLogisticsController extends Controller
     {
         $request->validate([
             'id' => 'required|exists:orders,id',
-            'biz_product_no' => 'nullable|string|max:32',
-            'product_type' => 'nullable|string|max:32',
-            'api_code' => 'nullable|string|max:16',
-            'sender_no' => 'nullable|string|max:64',
-            'msg_type' => 'nullable|string|max:10',
-            'version' => 'nullable|string|max:20',
-            'user_code' => 'nullable|string|max:64',
+            'biz_product_no' => 'nullable|string',
+            'product_type' => 'nullable|string',
+            'api_code' => 'nullable|string',
+            'sender_no' => 'nullable|string',
+            'msg_type' => 'nullable|string',
+            'version' => 'nullable|string',
+            'user_code' => 'nullable|string',
             'weight' => 'nullable|integer|min:1',
             'logistics_interface' => 'nullable|array',
             'sender' => 'nullable|array',
@@ -440,7 +671,7 @@ class OrderLogisticsController extends Controller
     {
         $request->validate([
             'id' => 'required|exists:orders,id',
-            'api_code' => 'nullable|string|max:16',
+            'api_code' => 'nullable|string',
             'logistics_interface' => 'nullable|array',
         ]);
 
@@ -533,30 +764,30 @@ class OrderLogisticsController extends Controller
     {
         $request->validate([
             'id' => 'required|exists:orders,id',
-            'product_id' => 'nullable|string|max:50',
+            'product_id' => 'nullable|string',
             'weight' => 'nullable|integer|min:1',
             'sz56t_form' => 'nullable|array',
             'sz56t_form.order_returnsign' => 'nullable|in:Y,N',
             'sz56t_form.length' => 'nullable|numeric|min:1|max:200',
             'sz56t_form.width' => 'nullable|numeric|min:1|max:200',
             'sz56t_form.height' => 'nullable|numeric|min:1|max:200',
-            'sz56t_form.consignee_name' => 'nullable|string|max:100',
-            'sz56t_form.consignee_address' => 'nullable|string|max:500',
-            'sz56t_form.consignee_telephone' => 'nullable|string|max:50',
-            'sz56t_form.consignee_mobile' => 'nullable|string|max:50',
-            'sz56t_form.consignee_city' => 'nullable|string|max:100',
-            'sz56t_form.consignee_state' => 'nullable|string|max:100',
-            'sz56t_form.consignee_postcode' => 'nullable|string|max:50',
-            'sz56t_form.country' => 'nullable|string|max:20',
-            'sz56t_form.consignee_email' => 'nullable|string|max:100',
+            'sz56t_form.consignee_name' => 'nullable|string',
+            'sz56t_form.consignee_address' => 'nullable|string',
+            'sz56t_form.consignee_telephone' => 'nullable|string',
+            'sz56t_form.consignee_mobile' => 'nullable|string',
+            'sz56t_form.consignee_city' => 'nullable|string',
+            'sz56t_form.consignee_state' => 'nullable|string',
+            'sz56t_form.consignee_postcode' => 'nullable|string',
+            'sz56t_form.country' => 'nullable|string',
+            'sz56t_form.consignee_email' => 'nullable|string',
             'sz56t_items' => 'nullable|array',
-            'sz56t_items.*.invoice_title' => 'nullable|string|max:100',
+            'sz56t_items.*.invoice_title' => 'nullable|string',
             'sz56t_items.*.invoice_amount' => 'nullable|numeric|min:0.01|max:999999',
             'sz56t_items.*.invoice_pcs' => 'nullable|integer|min:1|max:9999',
             'sz56t_items.*.invoice_weight' => 'nullable|numeric|min:0.01|max:50000',
-            'sz56t_items.*.sku_code' => 'nullable|string|max:100',
-            'sz56t_items.*.invoice_currency' => 'nullable|string|max:10',
-            'sz56t_items.*.origin_country' => 'nullable|string|max:20',
+            'sz56t_items.*.sku_code' => 'nullable|string',
+            'sz56t_items.*.invoice_currency' => 'nullable|string',
+            'sz56t_items.*.origin_country' => 'nullable|string',
         ]);
 
         $order = Order::with(['shop', 'items', 'currentLogistics'])->findOrFail($request->id);
@@ -632,7 +863,7 @@ class OrderLogisticsController extends Controller
     {
         $request->validate([
             'id' => 'required|exists:orders,id',
-            'print_type' => 'nullable|string|max:30',
+            'print_type' => 'nullable|string',
         ]);
 
         $order = Order::with('currentLogistics')->findOrFail($request->id);
@@ -786,7 +1017,7 @@ class OrderLogisticsController extends Controller
     {
         $request->validate([
             'id' => 'required|exists:orders,id',
-            'reason' => 'nullable|string|max:255',
+            'reason' => 'nullable|string',
         ]);
 
         $order = Order::with('currentLogistics')->findOrFail($request->id);
@@ -1144,6 +1375,160 @@ class OrderLogisticsController extends Controller
         return $this->success($result['data'] ?? [], $result['message'] ?? '交接清单状态已更新');
     }
 
+    public function addressBookList(Request $request)
+    {
+        $request->validate([
+            'type' => 'required|in:sender,receiver',
+            'keyword' => 'nullable|string',
+            'nation' => 'nullable|string',
+        ]);
+
+        $query = OrderAddressBook::query()
+            ->where('user_id', $request->user()->id)
+            ->where('type', $request->input('type'));
+
+        if ($request->filled('keyword')) {
+            $keyword = trim((string) $request->input('keyword'));
+            $query->where(function ($subQuery) use ($keyword) {
+                $subQuery->where('name', 'like', '%' . $keyword . '%')
+                    ->orWhere('company', 'like', '%' . $keyword . '%')
+                    ->orWhere('mobile', 'like', '%' . $keyword . '%')
+                    ->orWhere('phone', 'like', '%' . $keyword . '%')
+                    ->orWhere('address', 'like', '%' . $keyword . '%');
+            });
+        }
+
+        if ($request->filled('nation')) {
+            $query->where('nation', strtoupper(trim((string) $request->input('nation'))));
+        }
+
+        return $this->success([
+            'items' => $query->orderByDesc('updated_at')->orderByDesc('id')->get(),
+        ]);
+    }
+
+    public function addressBookSave(Request $request)
+    {
+        $request->validate([
+            'id' => 'nullable|integer',
+            'type' => 'required|in:sender,receiver',
+            'name' => 'required|string',
+            'company' => 'nullable|string',
+            'post_code' => 'nullable|string',
+            'phone' => 'nullable|string',
+            'mobile' => 'nullable|string',
+            'email' => 'nullable|string',
+            'id_type' => 'nullable|string',
+            'id_no' => 'nullable|string',
+            'nation' => 'nullable|string',
+            'province' => 'nullable|string',
+            'city' => 'nullable|string',
+            'county' => 'nullable|string',
+            'address' => 'required|string',
+            'gis' => 'nullable|string',
+            'linker' => 'nullable|string',
+        ]);
+
+        $user = $request->user();
+        $payload = $this->normalizeAddressBookPayload($request->all());
+
+        $entry = null;
+        if ($request->filled('id')) {
+            $entry = OrderAddressBook::query()
+                ->where('user_id', $user->id)
+                ->find($request->integer('id'));
+
+            if (!$entry) {
+                return $this->error('地址簿记录不存在');
+            }
+        }
+
+        if (!$entry) {
+            $entry = OrderAddressBook::query()
+                ->where('user_id', $user->id)
+                ->where('type', $payload['type'])
+                ->where('name', $payload['name'])
+                ->where('address', $payload['address'])
+                ->where('mobile', $payload['mobile'])
+                ->where('phone', $payload['phone'])
+                ->first();
+        }
+
+        if (!$entry) {
+            $entry = new OrderAddressBook();
+            $entry->user_id = $user->id;
+        }
+
+        $entry->fill($payload);
+        $entry->last_used_at = now();
+        $entry->save();
+
+        return $this->success([
+            'item' => $entry->fresh(),
+        ], '地址簿保存成功');
+    }
+
+    public function addressBookDelete(Request $request)
+    {
+        $request->validate([
+            'id' => 'required|integer',
+        ]);
+
+        $entry = OrderAddressBook::query()
+            ->where('user_id', $request->user()->id)
+            ->find($request->integer('id'));
+
+        if (!$entry) {
+            return $this->error('地址簿记录不存在');
+        }
+
+        $entry->delete();
+
+        return $this->success(null, '地址簿记录已删除');
+    }
+
+    public function addressBookRegionOptions(Request $request)
+    {
+        $request->validate([
+            'type' => 'required|in:sender,receiver',
+            'nation' => 'nullable|string',
+            'province' => 'nullable|string',
+            'city' => 'nullable|string',
+            'county' => 'nullable|string',
+        ]);
+
+        $filters = [
+            'nation' => strtoupper(trim((string) $request->input('nation', ''))),
+            'province' => trim((string) $request->input('province', '')),
+            'city' => trim((string) $request->input('city', '')),
+            'county' => trim((string) $request->input('county', '')),
+        ];
+
+        $rows = $this->buildAddressRegionRows($request->user(), (string) $request->input('type'));
+
+        return $this->success([
+            'nations' => $this->extractRegionOptions($rows, [], 'nation'),
+            'provinces' => $this->extractRegionOptions($rows, [
+                'nation' => $filters['nation'],
+            ], 'province'),
+            'cities' => $this->extractRegionOptions($rows, [
+                'nation' => $filters['nation'],
+                'province' => $filters['province'],
+            ], 'city'),
+            'counties' => $this->extractRegionOptions($rows, [
+                'nation' => $filters['nation'],
+                'province' => $filters['province'],
+                'city' => $filters['city'],
+            ], 'county'),
+            'post_codes' => $this->extractRegionOptions($rows, [
+                'nation' => $filters['nation'],
+                'province' => $filters['province'],
+                'city' => $filters['city'],
+                'county' => $filters['county'],
+            ], 'post_code'),
+        ]);
+    }
+
     private function ensureOrderHasShop(Order $order)
     {
         if (!$order->shop) {
@@ -1257,6 +1642,147 @@ class OrderLogisticsController extends Controller
     private function fbsWorkflowService(): OrderFbsWorkflowService
     {
         return new OrderFbsWorkflowService();
+    }
+
+    private function normalizeAddressBookPayload(array $input): array
+    {
+        $fields = [
+            'type', 'name', 'company', 'post_code', 'phone', 'mobile', 'email', 'id_type', 'id_no',
+            'nation', 'province', 'city', 'county', 'address', 'gis', 'linker',
+        ];
+
+        $payload = [];
+        foreach ($fields as $field) {
+            $payload[$field] = trim((string) ($input[$field] ?? ''));
+        }
+
+        $payload['type'] = strtolower($payload['type']);
+        $payload['nation'] = strtoupper($payload['nation']);
+
+        return $payload;
+    }
+
+    private function buildAddressRegionRows($user, string $type): array
+    {
+        $rows = OrderAddressBook::query()
+            ->where('user_id', $user->id)
+            ->where('type', $type)
+            ->get(['nation', 'province', 'city', 'county', 'post_code'])
+            ->map(function (OrderAddressBook $entry) {
+                return $this->normalizeAddressRegionRow($entry->toArray());
+            })
+            ->all();
+
+        if ($type === 'sender') {
+            $rows[] = $this->normalizeAddressRegionRow(config('services.chinapost.sender', []));
+        }
+
+        if ($type === 'receiver') {
+            $orderRows = $this->accessibleOrderRegionQuery($user)
+                ->where(function ($query) {
+                    $query->whereNotNull('receiver_region')
+                        ->orWhereNotNull('receiver_city')
+                        ->orWhereNotNull('receiver_zip');
+                })
+                ->distinct()
+                ->get([
+                    'receiver_country as nation',
+                    'receiver_region as province',
+                    'receiver_city as city',
+                    'receiver_zip as post_code',
+                ])
+                ->map(function ($row) {
+                    return $this->normalizeAddressRegionRow([
+                        'nation' => $row->nation,
+                        'province' => $row->province,
+                        'city' => $row->city,
+                        'county' => '',
+                        'post_code' => $row->post_code,
+                    ]);
+                })
+                ->all();
+
+            $rows = array_merge($rows, $orderRows);
+        }
+
+        return array_values(array_filter($rows, function (array $row) {
+            return $row['nation'] !== '' || $row['province'] !== '' || $row['city'] !== '' || $row['county'] !== '' || $row['post_code'] !== '';
+        }));
+    }
+
+    private function accessibleOrderRegionQuery($user)
+    {
+        $query = Order::query();
+
+        if ($user->hasRole('super-admin')) {
+            return $query;
+        }
+
+        if ($this->isTeamAdmin($user)) {
+            $teamIds = Team::where('admin_user_id', $user->id)->pluck('id');
+            $shopIds = Shop::whereIn('team_id', $teamIds)->pluck('id');
+
+            return $query->whereIn('shop_id', $shopIds);
+        }
+
+        $shopIds = Shop::where('user_id', $user->id)->pluck('id');
+
+        return $query->whereIn('shop_id', $shopIds);
+    }
+
+    private function extractRegionOptions(array $rows, array $filters, string $field): array
+    {
+        return collect($rows)
+            ->filter(function (array $row) use ($filters) {
+                return $this->rowMatchesRegionFilters($row, $filters);
+            })
+            ->pluck($field)
+            ->map(function ($value) {
+                return trim((string) $value);
+            })
+            ->filter()
+            ->unique()
+            ->sort()
+            ->values()
+            ->map(function (string $value) {
+                return [
+                    'label' => $value,
+                    'value' => $value,
+                ];
+            })
+            ->all();
+    }
+
+    private function rowMatchesRegionFilters(array $row, array $filters): bool
+    {
+        foreach ($filters as $field => $value) {
+            $expected = trim((string) $value);
+            if ($expected === '') {
+                continue;
+            }
+
+            if (trim((string) ($row[$field] ?? '')) !== $expected) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function normalizeAddressRegionRow(array $row): array
+    {
+        return [
+            'nation' => strtoupper(trim((string) ($row['nation'] ?? ''))),
+            'province' => trim((string) ($row['province'] ?? '')),
+            'city' => trim((string) ($row['city'] ?? '')),
+            'county' => trim((string) ($row['county'] ?? '')),
+            'post_code' => trim((string) ($row['post_code'] ?? '')),
+        ];
+    }
+
+    private function isTeamAdmin($user): bool
+    {
+        return $user->hasRole('team-admin');
     }
 
     private function prepareDbsShipment(Order $order, Request $request): array

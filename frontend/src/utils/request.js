@@ -28,6 +28,28 @@ service.interceptors.request.use(
   }
 )
 
+// 从 Laravel 422 errors 对象中提取第一条可读错误信息
+function extractLaravelValidationMessage(errorData) {
+  if (!errorData) return null
+  // Laravel 422: { message: '...', errors: { field: ['msg1', ...] } }
+  const errors = errorData.errors
+  if (errors && typeof errors === 'object') {
+    const firstField = Object.keys(errors)[0]
+    if (firstField) {
+      const msgs = errors[firstField]
+      if (Array.isArray(msgs) && msgs.length) {
+        return `${firstField}: ${msgs[0]}`
+      }
+    }
+  }
+  // 如果 message 本身是翻译 key（含点号且无空格），也尝试用 errors
+  const msg = errorData.message || ''
+  if (msg && !/\s/.test(msg) && msg.includes('.')) {
+    return null // 让调用方用 fallback
+  }
+  return msg || null
+}
+
 // response interceptor
 service.interceptors.response.use(
   response => {
@@ -60,7 +82,10 @@ service.interceptors.response.use(
           })
         })
       }
-      return Promise.reject(new Error(res.message || 'Error'))
+      // 标记已弹过，业务层 catch 不再重复弹
+      const err = new Error(res.message || 'Error')
+      err.alreadyNotified = true
+      return Promise.reject(err)
     } else {
       return res
     }
@@ -69,11 +94,19 @@ service.interceptors.response.use(
     console.log('err' + error)
     const silentError = Boolean(error.config && error.config.silentError)
     if (!silentError) {
+      // 尝试从 Laravel 422 响应中提取可读错误信息
+      const responseData = error.response && error.response.data
+      const validationMsg = extractLaravelValidationMessage(responseData)
+      const displayMsg = validationMsg || error.message
       Message({
-        message: error.message,
+        message: displayMsg,
         type: 'error',
         duration: 5 * 1000
       })
+      // 标记已弹过，业务层 catch 不再重复弹
+      const notifiedError = new Error(displayMsg)
+      notifiedError.alreadyNotified = true
+      return Promise.reject(notifiedError)
     }
     return Promise.reject(error)
   }

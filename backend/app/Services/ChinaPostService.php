@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Order;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use App\Models\SystemConfig;
 
 class ChinaPostService
 {
@@ -25,6 +26,7 @@ class ChinaPostService
     public function __construct()
     {
         $config = config('services.chinapost', []);
+        $sys = SystemConfig::getByGroup('chinapost');
         $this->baseUrl = $config['base_url'] ?? 'https://211.156.197.248:443';
         $this->ecCompanyId = $config['ec_company_id'] ?? '';
         $this->authorization = $config['authorization'] ?? '';
@@ -35,6 +37,20 @@ class ChinaPostService
         $this->apiCodes = $config['api_codes'] ?? [];
         $this->paths = $config['paths'] ?? [];
         $this->publicConfig = $config['public'] ?? [];
+
+        // 系统配置优先覆盖
+        if (!empty($sys['eub_product_code'])) {
+            $this->publicConfig['biz_product_no'] = $sys['eub_product_code'];
+        }
+        if (!empty($sys['agreement_code'])) {
+            $this->publicConfig['agreement_code'] = $sys['agreement_code'];
+        }
+        if (!empty($sys['ecommerce_flag'])) {
+            $this->publicConfig['ecommerce_flag'] = $sys['ecommerce_flag'];
+        }
+        if (!empty($sys['pickup_org_code'])) {
+            $this->publicConfig['pickup_org_code'] = $sys['pickup_org_code'];
+        }
 
         $this->defaultSender = $config['sender'] ?? [
             'name' => '',

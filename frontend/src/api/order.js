@@ -44,6 +44,18 @@ export function shipOrder(data) {
   return request({ url: '/orders/ship', method: 'post', data })
 }
 
+export function shipFbsOrder(data) {
+  return request({ url: '/orders/ship/fbs', method: 'post', data })
+}
+
+export function shipDbsChinaPostOrder(data) {
+  return request({ url: '/orders/ship/dbs/chinapost', method: 'post', data })
+}
+
+export function shipDbsLeiyiOrder(data) {
+  return request({ url: '/orders/ship/dbs/leiyi', method: 'post', data })
+}
+
 export function syncDbsShipmentToPlatform(data) {
   return request({ url: '/orders/dbs/sync-platform', method: 'post', data })
 }
@@ -114,6 +126,22 @@ export function chinaPostGetLabel(data) {
 
 export function chinaPostCancelOrder(data) {
   return request({ url: '/orders/chinapost/cancel', method: 'post', data })
+}
+
+export function fetchOrderAddressBookList(data) {
+  return request({ url: '/orders/address-books/list', method: 'post', data })
+}
+
+export function saveOrderAddressBook(data) {
+  return request({ url: '/orders/address-books/save', method: 'post', data })
+}
+
+export function deleteOrderAddressBook(data) {
+  return request({ url: '/orders/address-books/delete', method: 'post', data })
+}
+
+export function fetchOrderAddressBookRegionOptions(data) {
+  return request({ url: '/orders/address-books/region-options', method: 'post', data })
 }
 
 export function sz56tCreateOrder(data) {

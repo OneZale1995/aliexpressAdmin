@@ -20,6 +20,7 @@ export const ORDER_DICT_CODE = {
   deliveryStatus: 'ae_delivery_status',
   antifraudStatus: 'ae_antifraud_status',
   issueStatus: 'ae_issue_status',
+  shipmentStatus: 'ae_shipment_status',
   logisticsType: 'ae_logistics_type',
   logisticOrderStatus: 'ae_logistic_order_status',
   handoverListStatus: 'ae_handover_list_status',
@@ -146,6 +147,7 @@ const DEFAULT_LIST_QUERY = {
   has_purchase_image: '',
   has_shipping_image: '',
   issue_status: '',
+  shipment_status: '',
   date_start: '',
   date_end: '',
   purchase_date_start: '',
@@ -161,10 +163,20 @@ const DEFAULT_SHIP_FORM = {
   logistics_type: '',
   ship_provider: 'chinapost',
   provider_name: 'China Post',
+  api_code: '110001',
+  sender_no: '',
+  msg_type: '0',
+  version: 'V1.0.0',
+  user_code: '',
+  product_type: 'E邮宝',
   biz_product_no: '019',
   product_id: '',
   weight: 100,
   chinapost_request_json: '',
+  chinapost_form: {},
+  chinapost_sender: {},
+  chinapost_receiver: {},
+  chinapost_items: [],
   total_length: 20,
   total_width: 10,
   total_height: 5,
@@ -190,6 +202,81 @@ const DEFAULT_SHIP_FORM = {
   pickup_time_to: '',
   sz56t_form: {},
   sz56t_items: []
+}
+
+const DEFAULT_CHINAPOST_FORM = {
+  created_time: '',
+  logistics_order_no: '',
+  batch_no: '',
+  waybill_no: '',
+  mailType: '',
+  wh_code: '',
+  volume: '',
+  length: 0,
+  width: 0,
+  height: 0,
+  transfer_type: 'HK',
+  battery_flag: '0',
+  pickup_notes: '',
+  postage_total: '',
+  postage_currency: 'USD',
+  contents_total_weight: 0,
+  contents_total_value: 0,
+  insurance_flag: '',
+  insurance_amount: '',
+  undelivery_option: '2',
+  back_addr: '',
+  back_way: '1',
+  valuable_flag: '0',
+  declare_source: '2',
+  declare_type: '1',
+  declare_curr_code: 'USD',
+  printcode: '0',
+  barcode: '',
+  forecastshut: '0',
+  mail_sign: '2',
+  mail_flag: '0',
+  tax_id: '',
+  s_tax_id: '',
+  prepayment_of_vat: '',
+  pickup_flag: '0'
+}
+
+const DEFAULT_CHINAPOST_CONTACT = {
+  name: '',
+  company: '',
+  post_code: '',
+  phone: '',
+  mobile: '',
+  email: '',
+  id_type: '',
+  id_no: '',
+  nation: 'CN',
+  province: '',
+  city: '',
+  county: '',
+  address: '',
+  gis: '',
+  linker: ''
+}
+
+const DEFAULT_CHINAPOST_ITEM = {
+  cargo_no: '',
+  cargo_name: '',
+  cargo_name_en: '',
+  cargo_type_name: '',
+  cargo_type_name_en: '',
+  cargo_origin_name: 'CN',
+  cargo_link: '',
+  cargo_quantity: 1,
+  cargo_value: 0,
+  cost: 0,
+  cargo_currency: 'USD',
+  cargo_weight: 0,
+  cargo_description: '',
+  cargo_serial: '',
+  unit: '个',
+  intemsize: ''
 }
 
 const DEFAULT_SZ56T_FORM = {
@@ -356,6 +443,7 @@ export function createDefaultListQuery(overrides = {}) {
 export function createDefaultShipForm(overrides = {}) {
   const rawItems = Array.isArray(overrides.items) ? overrides.items : []
   const rawSz56tItems = Array.isArray(overrides.sz56t_items) ? overrides.sz56t_items : []
+  const rawChinaPostItems = Array.isArray(overrides.chinapost_items) ? overrides.chinapost_items : []
   const baseShipForm = {
     ...DEFAULT_SHIP_FORM,
     ...overrides
@@ -364,8 +452,35 @@ export function createDefaultShipForm(overrides = {}) {
   return {
     ...baseShipForm,
     items: rawItems,
+    chinapost_form: createDefaultChinaPostForm(overrides.chinapost_form || {}),
+    chinapost_sender: createDefaultChinaPostContact(overrides.chinapost_sender || {}),
+    chinapost_receiver: createDefaultChinaPostContact(overrides.chinapost_receiver || {}),
+    chinapost_items: rawChinaPostItems.length
+      ? rawChinaPostItems.map(item => createDefaultChinaPostItem(item))
+      : [createDefaultChinaPostItem()],
     sz56t_form: createDefaultSz56tForm(overrides.sz56t_form || {}),
     sz56t_items: rawSz56tItems.map(item => createDefaultSz56tItem(item))
+  }
+}
+
+export function createDefaultChinaPostForm(overrides = {}) {
+  return {
+    ...DEFAULT_CHINAPOST_FORM,
+    ...overrides
+  }
+}
+
+export function createDefaultChinaPostContact(overrides = {}) {
+  return {
+    ...DEFAULT_CHINAPOST_CONTACT,
+    ...overrides
+  }
+}
+
+export function createDefaultChinaPostItem(overrides = {}) {
+  return {
+    ...DEFAULT_CHINAPOST_ITEM,
+    ...overrides
   }
 }
 

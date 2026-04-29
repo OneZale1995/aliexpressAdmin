@@ -68,15 +68,7 @@
       :title="shipDialogTitle"
       :ship-form="shipForm"
       :shipping="shipping"
-      :can-cancel-sz56t-waybill="canCancelCurrentShipWaybill"
-      :sz56t-product-options="sz56tProductOptions"
-      :sz56t-product-loading="sz56tProductLoading"
       :dict-label-map="dictLabelMap"
-      @cancel-waybill="cancelCurrentShipWaybill"
-      @load-chinapost-preview="ensureChinaPostPreview"
-      @submit-chinapost-create="submitChinaPostCreate"
-      @submit-sz56t-create="submitSz56tCreate"
-      @submit-ship="submitShip"
       @submit-fbs-logistic-order="submitFbsLogisticOrder"
       @submit-fbs-handover-list="submitFbsHandoverList"
       @add-fbs-to-handover="addFbsToHandover"
@@ -86,8 +78,33 @@
       @mark-fbs-ready-for-pickup="markCurrentFbsReadyForPickup"
       @transfer-fbs-handover-list="transferCurrentFbsHandoverList"
       @refresh-fbs-workflow="refreshCurrentFbsWorkflow"
-      @load-sz56t-products="ensureSz56tProductOptions"
       @update-step="updateShipStep"
+    />
+
+    <dbs-provider-select-dialog
+      :visible.sync="dbsProviderSelectVisible"
+      :default-provider="dbsDefaultProvider"
+      @select="handleDbsProviderSelect"
+    />
+
+    <china-post-ship-dialog
+      :visible.sync="chinaPostDialogVisible"
+      :ship-form="shipForm"
+      :shipping="shipping"
+      @load-chinapost-preview="ensureChinaPostPreview"
+      @submit-ship="submitShip"
+    />
+
+    <leiyi-ship-dialog
+      :visible.sync="leiyiDialogVisible"
+      :ship-form="shipForm"
+      :shipping="shipping"
+      :can-cancel-sz56t-waybill="canCancelCurrentShipWaybill"
+      :sz56t-product-options="sz56tProductOptions"
+      :sz56t-product-loading="sz56tProductLoading"
+      @cancel-waybill="cancelCurrentShipWaybill"
+      @submit-ship="submitShip"
+      @load-sz56t-products="ensureSz56tProductOptions"
     />
 
     <order-sync-dialog
@@ -150,6 +167,9 @@ import OrderCommentDialog from './components/OrderCommentDialog'
 import OrderFilterPanel from './components/OrderFilterPanel'
 import OrderListSection from './components/OrderListSection'
 import OrderShipDialog from './components/OrderShipDialog'
+import ChinaPostShipDialog from './components/ChinaPostShipDialog'
+import LeiyiShipDialog from './components/LeiyiShipDialog'
+import DbsProviderSelectDialog from './components/DbsProviderSelectDialog'
 import OrderSyncDialog from './components/OrderSyncDialog'
 import OrderSyncProgressDialog from './components/OrderSyncProgressDialog'
 import {
@@ -157,7 +177,8 @@ import {
   createDefaultCommentTemp,
   createDefaultListQuery,
   createDefaultShipForm,
-  createDefaultSyncProgress
+  createDefaultSyncProgress,
+  createDefaultChinaPostItem
 } from './constants'
 import {
   applyChinaPostCreateResult,
@@ -166,6 +187,8 @@ import {
   applyShipResult,
   applySz56tCancelResult,
   applySz56tCreateResult,
+  buildChinaPostReceiverFromOrder,
+  buildChinaPostItemsFromOrder,
   buildSz56tFormFromOrder,
   buildSz56tItemsFromOrder,
   buildBackendStatusTabs,
@@ -196,6 +219,9 @@ const SZ56T_PRODUCT_CACHE_TTL = 24 * 60 * 60 * 1000
 export default {
   name: 'OrderManage',
   components: {
+    ChinaPostShipDialog,
+    DbsProviderSelectDialog,
+    LeiyiShipDialog,
     OrderCommentDialog,
     OrderFilterPanel,
     OrderListSection,
@@ -223,6 +249,10 @@ export default {
       backendStatusOptions: [],
       batchBackendStatus: '',
       shipDialogVisible: false,
+      dbsProviderSelectVisible: false,
+      chinaPostDialogVisible: false,
+      leiyiDialogVisible: false,
+      dbsDefaultProvider: 'chinapost',
       shipping: false,
       transferSheetLoadingId: null,
       shipForm: createDefaultShipForm(),
@@ -247,7 +277,7 @@ export default {
   },
   computed: {
     shipDialogTitle() {
-      return isDbsLogisticsType(this.shipForm.logistics_type) ? 'DBS 本地发货' : 'FBS 发货流程'
+      return 'FBS 发货流程'
     },
     currentPageOrderIds() {
       return this.list.map(order => order.id)
@@ -925,21 +955,30 @@ export default {
         weight: defaultSz56tWeight,
         sz56t_form: buildSz56tFormFromOrder(order, defaultSz56tWeight),
         sz56t_items: buildSz56tItemsFromOrder(order, defaultSz56tWeight),
+        chinapost_receiver: buildChinaPostReceiverFromOrder(order),
+        chinapost_items: buildChinaPostItemsFromOrder(order, defaultSz56tWeight),
         items: buildShipItemsFromOrder(order),
         logistic_order_id: order.logistic_order_id || null,
         handover_list_id: order.handover_list_id || null,
         handover_list_status: order.handover_list_status || '',
         workflow_loading: !isDbs
       })
-      this.shipDialogVisible = true
-      if (isDbs && defaultDbsProvider === 'chinapost') {
-        this.ensureChinaPostPreview()
-      }
-      if (isDbs && defaultDbsProvider === 'leiyi') {
-        this.ensureSz56tProductOptions()
-      }
-      if (!isDbs) {
+      if (isDbs) {
+        this.dbsDefaultProvider = defaultDbsProvider
+        this.dbsProviderSelectVisible = true
+      } else {
+        this.shipDialogVisible = true
         this.refreshCurrentFbsWorkflow()
+      }
+    },
+    handleDbsProviderSelect(provider) {
+      this.shipForm.ship_provider = provider
+      if (provider === 'chinapost') {
+        this.chinaPostDialogVisible = true
+        this.ensureChinaPostPreview()
+      } else {
+        this.leiyiDialogVisible = true
+        this.ensureSz56tProductOptions()
       }
     },
     ensureChinaPostPreview(force = false) {
@@ -960,6 +999,53 @@ export default {
 
         if (Number(logisticsInterface.weight || 0) > 0) {
           this.shipForm.weight = Number(logisticsInterface.weight || 0)
+        }
+
+        if (requestData.senderNo || requestData.sender_no) {
+          this.shipForm.sender_no = requestData.senderNo || requestData.sender_no
+        }
+        if (logisticsInterface.mailType) {
+          this.shipForm.chinapost_form.mailType = logisticsInterface.mailType
+        }
+        if (logisticsInterface.wh_code) {
+          this.shipForm.chinapost_form.wh_code = logisticsInterface.wh_code
+        }
+        if (!this.shipForm.chinapost_form.created_time) {
+          this.shipForm.chinapost_form.created_time = logisticsInterface.created_time || new Date().toISOString().replace('T', ' ').slice(0, 19)
+        }
+        if (logisticsInterface.logistics_order_no && !this.shipForm.chinapost_form.logistics_order_no) {
+          this.shipForm.chinapost_form.logistics_order_no = logisticsInterface.logistics_order_no
+        }
+        if (logisticsInterface.barcode && !this.shipForm.chinapost_form.barcode) {
+          this.shipForm.chinapost_form.barcode = logisticsInterface.barcode
+        }
+
+        const receiverData = logisticsInterface.receiver || {}
+        if (!this.shipForm.chinapost_receiver) {
+          this.$set(this.shipForm, 'chinapost_receiver', {})
+        }
+        const receiverFields = ['name', 'company', 'post_code', 'phone', 'mobile', 'email', 'province', 'city', 'county', 'address', 'linker']
+        receiverFields.forEach(key => {
+          if (receiverData[key] && !this.shipForm.chinapost_receiver[key]) {
+            this.$set(this.shipForm.chinapost_receiver, key, receiverData[key])
+          }
+        })
+        this.$set(this.shipForm.chinapost_receiver, 'nation', 'RU')
+
+        const senderData = logisticsInterface.sender || {}
+        if (!this.shipForm.chinapost_sender) {
+          this.$set(this.shipForm, 'chinapost_sender', {})
+        }
+        const senderFields = ['name', 'company', 'post_code', 'phone', 'mobile', 'email', 'nation', 'province', 'city', 'county', 'address', 'linker']
+        senderFields.forEach(key => {
+          if (senderData[key] && !this.shipForm.chinapost_sender[key]) {
+            this.$set(this.shipForm.chinapost_sender, key, senderData[key])
+          }
+        })
+
+        const backendItems = Array.isArray(logisticsInterface.items) ? logisticsInterface.items : []
+        if (backendItems.length && (!Array.isArray(this.shipForm.chinapost_items) || this.shipForm.chinapost_items.length <= 1)) {
+          this.$set(this.shipForm, 'chinapost_items', backendItems.map(item => createDefaultChinaPostItem(item)))
         }
       }).catch(err => {
         this.showError(err, '获取中国邮政请求参数失败')
@@ -991,6 +1077,29 @@ export default {
 
       logisticsInterface.biz_product_no = '019'
 
+      if (this.shipForm.chinapost_sender && typeof this.shipForm.chinapost_sender === 'object') {
+        logisticsInterface.sender = { ...logisticsInterface.sender, ...this.shipForm.chinapost_sender }
+      }
+      this.sanitizeChinaPostContact(logisticsInterface.sender)
+
+      if (this.shipForm.chinapost_receiver && typeof this.shipForm.chinapost_receiver === 'object') {
+        logisticsInterface.receiver = { ...logisticsInterface.receiver, ...this.shipForm.chinapost_receiver }
+      }
+      this.sanitizeChinaPostContact(logisticsInterface.receiver)
+      if (Array.isArray(this.shipForm.chinapost_items) && this.shipForm.chinapost_items.length) {
+        logisticsInterface.items = this.shipForm.chinapost_items
+      }
+      if (this.shipForm.chinapost_form && typeof this.shipForm.chinapost_form === 'object') {
+        const formFields = this.shipForm.chinapost_form
+        if (formFields.barcode) logisticsInterface.barcode = formFields.barcode
+        if (formFields.mailType) logisticsInterface.mailType = formFields.mailType
+        if (formFields.volume) logisticsInterface.volume = formFields.volume
+        if (formFields.length > 0) logisticsInterface.length = formFields.length
+        if (formFields.width > 0) logisticsInterface.width = formFields.width
+        if (formFields.height > 0) logisticsInterface.height = formFields.height
+      }
+      logisticsInterface.weight = Number(this.shipForm.weight || logisticsInterface.weight || 0)
+
       const payload = {
         api_code: parsed.apiCode || parsed.api_code || '110001',
         sender_no: parsed.senderNo || parsed.sender_no || logisticsInterface.sender_no || '',
@@ -1009,6 +1118,18 @@ export default {
       }
 
       return payload
+    },
+    sanitizeChinaPostContact(contact) {
+      if (!contact || typeof contact !== 'object') return
+      if (!contact.linker && contact.name) {
+        contact.linker = contact.name
+      }
+      if (contact.mobile) {
+        contact.mobile = String(contact.mobile).replace(/^\+/, '')
+      }
+      if (contact.phone) {
+        contact.phone = String(contact.phone).replace(/^\+/, '')
+      }
     },
     getSz56tProductCache() {
       try {
@@ -1414,6 +1535,7 @@ export default {
       }).then(res => {
         const waybillNo = res.data && res.data.waybill_no
         this.$message.success(res.message || '邮政下单成功')
+        this.chinaPostDialogVisible = false
         if (waybillNo) {
           this.shipForm.track_number = waybillNo
           const target = this.list.find(order => order.id === this.shipForm.id)
@@ -1490,6 +1612,7 @@ export default {
           }
           shipDbsLeiyiOrder(payload).then(async res => {
             this.$message.success(res.message || 'DBS 雷翼发货已记录')
+            this.leiyiDialogVisible = false
             const target = this.list.find(o => o.id === this.shipForm.id)
             const resultData = res.data || {}
             applyShipResult(target, resultData, this.shipForm.track_number, 'leiyi')
@@ -1529,6 +1652,7 @@ export default {
         }
         shipDbsChinaPostOrder(payload).then(res => {
           this.$message.success(res.message || 'DBS 邮政发货已记录')
+          this.chinaPostDialogVisible = false
           const target = this.list.find(o => o.id === this.shipForm.id)
           const resultData = res.data || {}
           applyShipResult(target, resultData, this.shipForm.track_number, 'chinapost')

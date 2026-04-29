@@ -99,9 +99,11 @@ class OrderLogisticsService
 
     private function syncLegacySnapshot(Order $order, OrderLogistics $logistics): void
     {
+        $isCancelled = ($logistics->logistic_status ?? '') === 'cancelled';
+
         $legacy = [
             'logistics_type' => $this->resolveLegacyLogisticsType($logistics),
-            'logistics_template' => $this->resolveLegacyTemplateCode($logistics),
+            'logistics_template' => $isCancelled ? '' : $this->resolveLegacyTemplateCode($logistics),
             'tracking_number' => $logistics->tracking_number ?? '',
             'logistic_order_id' => $logistics->platform_logistic_order_id,
             'handover_list_id' => $logistics->handover_list_id,

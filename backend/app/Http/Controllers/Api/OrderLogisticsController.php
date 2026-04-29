@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Data\ChinaRegions;
+use App\Data\ChinaRegionsPart3;
+use App\Data\ChinaRegionsPart4;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\OrderAddressBook;
@@ -1675,6 +1678,26 @@ class OrderLogisticsController extends Controller
 
         if ($type === 'sender') {
             $rows[] = $this->normalizeAddressRegionRow(config('services.chinapost.sender', []));
+
+            $chinaRegions = array_merge(
+                ChinaRegions::all(),
+                ChinaRegions::allPart2(),
+                ChinaRegionsPart3::all(),
+                ChinaRegionsPart4::all()
+            );
+            foreach ($chinaRegions as $province => $cities) {
+                foreach ($cities as $city => $counties) {
+                    foreach ($counties as $county) {
+                        $rows[] = [
+                            'nation' => 'CN',
+                            'province' => $province,
+                            'city' => $city,
+                            'county' => $county,
+                            'post_code' => '',
+                        ];
+                    }
+                }
+            }
         }
 
         if ($type === 'receiver') {

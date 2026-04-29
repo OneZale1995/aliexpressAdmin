@@ -27,10 +27,29 @@ class ChinaPostService
     {
         $config = config('services.chinapost', []);
         $sys = SystemConfig::getByGroup('chinapost');
-        $this->baseUrl = $config['base_url'] ?? 'https://211.156.197.248:443';
+
+        $isProduction = ($sys['env'] ?? 'test') === 'production';
+        $envPrefix = $isProduction ? 'prod_' : 'test_';
+
+        if (!empty($sys[$envPrefix . 'base_url'])) {
+            $this->baseUrl = $sys[$envPrefix . 'base_url'];
+        } else {
+            $this->baseUrl = $config['base_url'] ?? 'https://211.156.197.248:443';
+        }
+
+        if (!empty($sys[$envPrefix . 'authorization'])) {
+            $this->authorization = $sys[$envPrefix . 'authorization'];
+        } else {
+            $this->authorization = $config['authorization'] ?? '';
+        }
+
+        if (!empty($sys[$envPrefix . 'digest_key'])) {
+            $this->digestKey = $sys[$envPrefix . 'digest_key'];
+        } else {
+            $this->digestKey = $config['digest_key'] ?? '';
+        }
+
         $this->ecCompanyId = $config['ec_company_id'] ?? '';
-        $this->authorization = $config['authorization'] ?? '';
-        $this->digestKey = $config['digest_key'] ?? '';
         $this->mailType = $config['mail_type'] ?? '';
         $this->whCode = $config['wh_code'] ?? '';
         $this->verifySsl = $config['verify_ssl'] ?? false;
@@ -38,18 +57,28 @@ class ChinaPostService
         $this->paths = $config['paths'] ?? [];
         $this->publicConfig = $config['public'] ?? [];
 
+        if (!empty($sys[$envPrefix . 'api_path'])) {
+            $this->paths['open_api'] = $sys[$envPrefix . 'api_path'];
+        }
+
         // 系统配置优先覆盖
         if (!empty($sys['eub_product_code'])) {
             $this->publicConfig['biz_product_no'] = $sys['eub_product_code'];
         }
         if (!empty($sys['agreement_code'])) {
             $this->publicConfig['agreement_code'] = $sys['agreement_code'];
+            $this->ecCompanyId = $sys['agreement_code'];
         }
         if (!empty($sys['ecommerce_flag'])) {
             $this->publicConfig['ecommerce_flag'] = $sys['ecommerce_flag'];
+            $this->mailType = $sys['ecommerce_flag'];
         }
         if (!empty($sys['pickup_org_code'])) {
             $this->publicConfig['pickup_org_code'] = $sys['pickup_org_code'];
+            $this->whCode = $sys['pickup_org_code'];
+        }
+        if (!empty($sys['label_ak'])) {
+            $this->publicConfig['label_ak'] = $sys['label_ak'];
         }
 
         $this->defaultSender = $config['sender'] ?? [
@@ -513,10 +542,14 @@ class ChinaPostService
             $pdfBase64 = $this->extractLabelBase64($retBodyRaw, $retBody);
             $pdfContent = $pdfBase64 !== '' ? base64_decode($pdfBase64, true) : false;
 
+            $logData = $data;
+            if (isset($logData['retBody']['data']) && is_array($logData['retBody']['data'])) {
+                $logData['retBody']['data'] = '[byte array, ' . count($logData['retBody']['data']) . ' bytes]';
+            }
             $this->thirdPartyLog()->info('ChinaPost getLabel response', [
                 'waybill_no' => $waybillNo,
                 'status' => $response->status(),
-                'response' => $data,
+                'response' => $logData,
             ]);
 
             if (!empty($data['success']) && (($data['retCode'] ?? '') === '00000' || ($data['retCode'] ?? '') === '')) {
@@ -662,11 +695,11 @@ class ChinaPostService
             $totalValue += $price * $qty;
 
             $cargoItems[] = [
-                'cargo_no' => (string) ($item->sku_id ?: ($index + 1)),
-                'cargo_name' => mb_substr($item->item_title ?: '商品', 0, 50),
-                'cargo_name_en' => mb_substr($item->item_title ?: 'Product', 0, 50),
-                'cargo_type_name' => mb_substr($item->item_title ?: '商品', 0, 50),
-                'cargo_type_name_en' => mb_substr($item->item_title ?: 'Product', 0, 50),
+                'cargo_no' => (string) ($item->sku_code ?: $item->ae_sku_id ?: ($index + 1)),
+                'cargo_name' => mb_substr($item->name ?: '商品', 0, 50),
+                'cargo_name_en' => mb_substr($item->name ?: 'Product', 0, 50),
+                'cargo_type_name' => mb_substr($item->name ?: '商品', 0, 50),
+                'cargo_type_name_en' => mb_substr($item->name ?: 'Product', 0, 50),
                 'cargo_origin_name' => 'CN',
                 'cargo_link' => '',
                 'cargo_quantity' => $qty,
@@ -675,7 +708,7 @@ class ChinaPostService
                 'cargo_currency' => 'USD',
                 'carogo_weight' => $weight,
                 'cargo_weight' => $weight,
-                'cargo_description' => mb_substr($item->item_title ?: 'Product', 0, 200),
+                'cargo_description' => mb_substr($item->name ?: 'Product', 0, 200),
                 'cargo_serial' => '',
                 'unit' => (string) $this->public('item_unit', '个'),
                 'intemsize' => '',
@@ -731,6 +764,11 @@ class ChinaPostService
         if (is_array($options['receiver'] ?? null)) {
             $receiver = array_merge($receiver, $options['receiver']);
         }
+        foreach (['mobile', 'phone'] as $phoneField) {
+            if (!empty($receiver[$phoneField])) {
+                $receiver[$phoneField] = ltrim($receiver[$phoneField], '+');
+            }
+        }
 
         $sender = array_merge([
             'id_type' => '',
@@ -740,6 +778,16 @@ class ChinaPostService
 
         if (is_array($options['sender'] ?? null)) {
             $sender = array_merge($sender, $options['sender']);
+        }
+
+        // linker 为空时用 name 兜底；mobile/phone 去掉 + 前缀
+        if (empty($sender['linker']) && !empty($sender['name'])) {
+            $sender['linker'] = $sender['name'];
+        }
+        foreach (['mobile', 'phone'] as $phoneField) {
+            if (!empty($sender[$phoneField])) {
+                $sender[$phoneField] = ltrim($sender[$phoneField], '+');
+            }
         }
 
         return [
@@ -895,8 +943,13 @@ class ChinaPostService
 
     protected function extractLabelBase64($retBodyRaw, array $retBody): string
     {
+        $dataField = data_get($retBody, 'data');
+        if (is_array($dataField) && !empty($dataField) && array_key_exists(0, $dataField)) {
+            return base64_encode($this->byteArrayToBinary($dataField));
+        }
+
         $candidates = [
-            data_get($retBody, 'data'),
+            $dataField,
             data_get($retBody, 'base64'),
             data_get($retBody, 'pdf_base64'),
             data_get($retBody, 'pdfBase64'),
@@ -922,6 +975,16 @@ class ChinaPostService
         }
 
         return '';
+    }
+
+    protected function byteArrayToBinary(array $bytes): string
+    {
+        ksort($bytes, SORT_NUMERIC);
+        $binary = '';
+        foreach ($bytes as $byte) {
+            $binary .= chr(((int) $byte) & 0xFF);
+        }
+        return $binary;
     }
 
     /**

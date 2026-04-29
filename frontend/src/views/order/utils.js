@@ -4,7 +4,9 @@ import {
   STATUS_TAG_TYPE,
   createDefaultSz56tForm,
   createDefaultSz56tItem,
-  createDefaultSz56tVolume
+  createDefaultSz56tVolume,
+  createDefaultChinaPostContact,
+  createDefaultChinaPostItem
 } from './constants'
 
 export function translateByCode(value, code, dictLabelMap = {}) {
@@ -383,6 +385,54 @@ export function buildSz56tItemsFromOrder(order, fallbackWeight = 100) {
   }))
 }
 
+export function buildChinaPostReceiverFromOrder(order) {
+  return createDefaultChinaPostContact({
+    name: order.receiver_name || order.buyer_name || '',
+    phone: order.receiver_phone || order.buyer_phone || '',
+    mobile: order.receiver_phone || order.buyer_phone || '',
+    email: order.buyer_email || '',
+    post_code: order.receiver_zip || '',
+    province: order.receiver_region || '',
+    city: order.receiver_city || '',
+    county: '',
+    address: order.receiver_street || order.delivery_address || '',
+    company: '',
+    nation: 'RU',
+    linker: order.receiver_name || order.buyer_name || 'Customer'
+  })
+}
+
+export function buildChinaPostItemsFromOrder(order, fallbackWeight = 100) {
+  const orderItems = Array.isArray(order.items) ? order.items : []
+  const totalQuantity = orderItems.reduce((sum, item) => sum + Number(item.quantity || 1), 0)
+  const defaultUnitWeight = Math.max(1, Math.round(Number(fallbackWeight || 100) / Math.max(totalQuantity, 1)))
+
+  if (!orderItems.length) {
+    return [createDefaultChinaPostItem({
+      cargo_no: order.ae_order_id || '',
+      cargo_name: '商品',
+      cargo_name_en: 'Product',
+      cost: Number(order.total_amount || 0),
+      cargo_quantity: 1,
+      cargo_weight: Number(fallbackWeight || 100)
+    })]
+  }
+
+  return orderItems.map(item => createDefaultChinaPostItem({
+    cargo_no: item.sku_code || item.ae_sku_id || '',
+    cargo_name: item.name || '商品',
+    cargo_name_en: item.name || 'Product',
+    cargo_type_name: item.name || '商品',
+    cargo_type_name_en: item.name || 'Product',
+    cost: Number(item.item_price || 0) * Number(item.quantity || 1),
+    cargo_value: Number(item.item_price || 0),
+    cargo_quantity: Number(item.quantity || 1),
+    cargo_weight: defaultUnitWeight,
+    cargo_origin_name: 'CN',
+    cargo_currency: item.currency || 'USD',
+    unit: '个'
+  }))
+}
 export function isDbsLogisticsType(value) {
   return String(value || '').toUpperCase() === 'DBS'
 }
@@ -425,7 +475,7 @@ function resolvePrintLabelProviderByTrackingNumber(trackingNumber) {
     return 'sz56t'
   }
 
-  if (normalizedTrackingNumber.startsWith('LK')) {
+  if (/^L[A-Z]\d{9}CN$/.test(normalizedTrackingNumber)) {
     return 'chinapost'
   }
 
@@ -533,6 +583,7 @@ export function resolvePrintLabelProviderCandidates(order) {
 
   const {
     isDbs,
+    providerCode,
     externalOrderId,
     trackingNumber
   } = getPrintLabelContext(order)
@@ -541,6 +592,16 @@ export function resolvePrintLabelProviderCandidates(order) {
 
   if (!isDbs) {
     appendPrintLabelProvider(providers, 'platform')
+    return providers
+  }
+
+  if (providerCode === 'chinapost') {
+    appendPrintLabelProvider(providers, 'chinapost')
+    return providers
+  }
+
+  if (providerCode === 'sz56t' || providerCode === 'leiyi') {
+    appendPrintLabelProvider(providers, 'sz56t')
     return providers
   }
 
@@ -572,10 +633,6 @@ export function canPrintLabel(order) {
     trackingNumber
   } = getPrintLabelContext(order)
 
-  if (logisticStatus === 'cancelled' || isCancelledOrder(order)) {
-    return false
-  }
-
   return providers.some(provider => {
     if (provider === 'sz56t') {
       return Boolean(externalOrderId || trackingNumber)
@@ -586,6 +643,9 @@ export function canPrintLabel(order) {
     }
 
     if (provider === 'platform') {
+      if (logisticStatus === 'cancelled' || isCancelledOrder(order)) {
+        return false
+      }
       return Boolean(platformLogisticOrderId)
     }
 
@@ -861,7 +921,7 @@ export function applySz56tCancelResult(order) {
   order.sz56t_order_id = ''
   order.actual_ship_at = ''
   order.marked_ship_at = ''
-  order.logistics_template = 'offline_leiyi'
+  order.logistics_template = ''
 
   const logistics = ensureCurrentLogistics(order)
   if (!logistics) {

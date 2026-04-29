@@ -17,7 +17,14 @@
           <el-input v-if="row.type === 'text'" v-model="row.value" size="small" />
           <el-input v-else-if="row.type === 'textarea'" v-model="row.value" type="textarea" :rows="2" size="small" />
           <el-input-number v-else-if="row.type === 'number'" v-model="row.value" size="small" />
-          <el-switch v-else-if="row.type === 'switch'" v-model="row.value" active-value="1" inactive-value="0" />
+          <el-switch
+            v-else-if="row.type === 'switch'"
+            v-model="row.value"
+            :active-value="parseSwitchOptions(row).activeValue"
+            :inactive-value="parseSwitchOptions(row).inactiveValue"
+            :active-text="parseSwitchOptions(row).activeText"
+            :inactive-text="parseSwitchOptions(row).inactiveText"
+          />
           <div v-else-if="row.type === 'image'" style="display: flex; align-items: center; gap: 8px;">
             <el-image v-if="row.value" :src="row.value" style="width: 60px; height: 60px;" fit="cover" />
             <el-input v-model="row.value" size="small" placeholder="图片URL" />
@@ -82,7 +89,7 @@ export default {
       list: [],
       activeGroup: 'site',
       groups: ['site', 'upload'],
-      groupLabels: { site: '网站设置', upload: '上传设置', finance: '财务设置' },
+      groupLabels: { site: '网站设置', upload: '上传设置', finance: '财务设置', chinapost: '中国邮政' },
       dialogVisible: false,
       dialogStatus: '',
       temp: { id: undefined, group: 'default', key: '', name: '', value: '', type: 'text', options: '', description: '', sort: 0 },
@@ -157,6 +164,15 @@ export default {
       batchSaveConfig(configs).then(() => {
         this.$message.success('保存成功')
       })
+    },
+    parseSwitchOptions(row) {
+      const defaults = { activeValue: '1', inactiveValue: '0', activeText: '', inactiveText: '' }
+      if (!row.options) return defaults
+      try {
+        return { ...defaults, ...JSON.parse(row.options) }
+      } catch {
+        return defaults
+      }
     }
   }
 }

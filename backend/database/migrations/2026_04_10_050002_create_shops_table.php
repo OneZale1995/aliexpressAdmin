@@ -23,8 +23,8 @@ return new class extends Migration
             $table->unsignedBigInteger('team_id')->comment('所属团队ID');
             $table->timestamps();
 
-            $table->foreign('user_id')->references('id')->on('admin_users')->onDelete('cascade');
-            $table->foreign('team_id')->references('id')->on('teams')->onDelete('cascade');
+            $table->index('user_id');
+            $table->index('team_id');
         });
     }
 

@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::create('admin_order_address_books', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained('admin_users')->cascadeOnDelete();
+            $table->unsignedBigInteger('user_id');
             $table->string('type', 20);
             $table->string('name', 100);
             $table->string('company', 100)->nullable();

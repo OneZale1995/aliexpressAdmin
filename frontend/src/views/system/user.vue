@@ -42,8 +42,8 @@
         <el-form-item label="昵称">
           <el-input v-model="temp.nickname" />
         </el-form-item>
-        <el-form-item label="密码" :prop="dialogStatus === 'create' ? 'password' : ''">
-          <el-input v-model="temp.password" type="password" :placeholder="dialogStatus === 'update' ? '留空则不修改' : ''" />
+        <el-form-item label="密码" prop="password">
+          <el-input v-model="temp.password" type="password" autocomplete="new-password" :placeholder="dialogStatus === 'update' ? '留空则不修改' : ''" />
         </el-form-item>
         <el-form-item label="角色">
           <el-select v-model="temp.role_ids" multiple placeholder="请选择角色" style="width: 100%">
@@ -78,10 +78,17 @@ export default {
       roleOptions: [],
       temp: { id: undefined, username: '', nickname: '', password: '', role_ids: [], status: 1 },
       dialogFormVisible: false,
-      dialogStatus: '',
-      rules: {
+      dialogStatus: ''
+    }
+  },
+  computed: {
+    rules() {
+      const passwordRules = this.dialogStatus === 'create'
+        ? [{ required: true, message: '请输入密码', trigger: 'blur' }, { min: 6, message: '密码至少6位', trigger: 'blur' }]
+        : [{ min: 6, message: '密码至少6位', trigger: 'blur' }]
+      return {
         username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
-        password: [{ required: true, message: '请输入密码', trigger: 'blur' }, { min: 6, message: '密码至少6位', trigger: 'blur' }]
+        password: passwordRules
       }
     }
   },
@@ -128,9 +135,7 @@ export default {
       })
     },
     handleUpdate(row) {
-      this.temp = Object.assign({}, row)
-      this.temp.password = ''
-      this.temp.role_ids = (row.roles || []).map(r => r.id)
+      this.temp = Object.assign({}, row, { password: '', role_ids: (row.roles || []).map(r => r.id) })
       this.dialogStatus = 'update'
       this.dialogFormVisible = true
       this.$nextTick(() => { this.$refs['dataForm'].clearValidate() })

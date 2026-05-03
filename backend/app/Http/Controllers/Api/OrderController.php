@@ -528,7 +528,7 @@ class OrderController extends Controller
         $payload = [
             'seller_comment' => $request->input('seller_comment', $order->seller_comment),
             'admin_remark' => $request->input('admin_remark', $order->admin_remark),
-            'backend_status' => $request->input('backend_status', $order->backend_status),
+            'backend_status' => $request->input('backend_status') ?: '',
             'purchase_image' => $request->input('purchase_image', $order->purchase_image),
             'shipping_image' => $request->input('shipping_image', $order->shipping_image),
             'purchase_date' => $request->input('purchase_date', $order->purchase_date),

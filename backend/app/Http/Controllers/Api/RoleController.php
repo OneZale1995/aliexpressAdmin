@@ -30,7 +30,7 @@ class RoleController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'name' => 'required|string|max:50|unique:roles',
+            'name' => 'required|string|max:50|unique:admin_roles',
             'display_name' => 'required|string|max:100',
             'description' => 'nullable|string|max:191',
             'status' => 'in:0,1',
@@ -58,7 +58,7 @@ class RoleController extends Controller
         $role = Role::findOrFail($request->id);
 
         $request->validate([
-            'name' => 'required|string|max:50|unique:roles,name,' . $role->id,
+            'name' => 'required|string|max:50|unique:admin_roles,name,' . $role->id,
             'display_name' => 'required|string|max:100',
             'description' => 'nullable|string|max:191',
             'status' => 'in:0,1',

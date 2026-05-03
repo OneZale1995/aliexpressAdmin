@@ -137,6 +137,22 @@ class DatabaseSeeder extends Seeder
             ['group' => 'upload', 'key' => 'upload_max_size', 'name' => '最大上传大小(MB)', 'value' => '10', 'type' => 'number', 'sort' => 1],
             ['group' => 'upload', 'key' => 'upload_allowed_ext', 'name' => '允许上传格式', 'value' => 'jpg,jpeg,png,gif,pdf,doc,docx,xls,xlsx', 'type' => 'text', 'sort' => 2],
             ['group' => 'finance', 'key' => 'cny_exchange_rate', 'name' => '人民币汇率', 'value' => '7.2000', 'type' => 'number', 'description' => '用于将利润折算为人民币', 'sort' => 1],
+
+            // 中国邮政配置
+            ['group' => 'chinapost', 'key' => 'env', 'name' => '运行环境', 'value' => 'test', 'type' => 'select', 'options' => 'test:测试环境,production:正式环境', 'description' => '切换测试/正式环境', 'sort' => 1],
+            ['group' => 'chinapost', 'key' => 'test_base_url', 'name' => '测试环境地址', 'value' => '', 'type' => 'text', 'description' => '测试环境API基础地址', 'sort' => 2],
+            ['group' => 'chinapost', 'key' => 'test_authorization', 'name' => '测试环境授权码', 'value' => '', 'type' => 'text', 'description' => '测试环境协议客户授权码', 'sort' => 3],
+            ['group' => 'chinapost', 'key' => 'test_digest_key', 'name' => '测试环境SM4密钥', 'value' => '', 'type' => 'text', 'description' => '测试环境SM4加密密钥(Base64)', 'sort' => 4],
+            ['group' => 'chinapost', 'key' => 'test_api_path', 'name' => '测试环境API路径', 'value' => '', 'type' => 'text', 'description' => '测试环境开放平台接口路径', 'sort' => 5],
+            ['group' => 'chinapost', 'key' => 'prod_base_url', 'name' => '正式环境地址', 'value' => '', 'type' => 'text', 'description' => '正式环境API基础地址', 'sort' => 6],
+            ['group' => 'chinapost', 'key' => 'prod_authorization', 'name' => '正式环境授权码', 'value' => '', 'type' => 'text', 'description' => '正式环境协议客户授权码', 'sort' => 7],
+            ['group' => 'chinapost', 'key' => 'prod_digest_key', 'name' => '正式环境SM4密钥', 'value' => '', 'type' => 'text', 'description' => '正式环境SM4加密密钥(Base64)', 'sort' => 8],
+            ['group' => 'chinapost', 'key' => 'prod_api_path', 'name' => '正式环境API路径', 'value' => '', 'type' => 'text', 'description' => '正式环境开放平台接口路径', 'sort' => 9],
+            ['group' => 'chinapost', 'key' => 'agreement_code', 'name' => '协议大客户号', 'value' => '', 'type' => 'text', 'description' => '协议大客户号(ecCompanyId)', 'sort' => 10],
+            ['group' => 'chinapost', 'key' => 'ecommerce_flag', 'name' => '电商标识', 'value' => '', 'type' => 'text', 'description' => '电商标识(mailType)', 'sort' => 11],
+            ['group' => 'chinapost', 'key' => 'pickup_org_code', 'name' => '揽收机构编号', 'value' => '', 'type' => 'text', 'description' => '揽收机构编号(whCode)', 'sort' => 12],
+            ['group' => 'chinapost', 'key' => 'eub_product_code', 'name' => 'EUB产品代码', 'value' => '', 'type' => 'text', 'description' => '业务产品编号(biz_product_no)', 'sort' => 13],
+            ['group' => 'chinapost', 'key' => 'label_ak', 'name' => '面单AK', 'value' => '', 'type' => 'text', 'description' => '获取面单接口AK', 'sort' => 14],
         ];
 
         foreach ($defaultConfigs as $config) {
@@ -154,5 +170,6 @@ class DatabaseSeeder extends Seeder
         DictData::firstOrCreate(['dict_type_id' => $dictStatus->id, 'value' => '0'], ['dict_type_id' => $dictStatus->id, 'label' => '禁用', 'value' => '0', 'sort' => 2]);
 
         $this->call(OrderStatusDictSeeder::class);
+        $this->call(ShopModuleSeeder::class);
     }
 }

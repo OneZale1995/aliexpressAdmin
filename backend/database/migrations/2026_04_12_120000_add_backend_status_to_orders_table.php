@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::table('orders', function (Blueprint $table) {
             if (!Schema::hasColumn('orders', 'backend_status')) {
-                $table->string('backend_status', 50)->default('')->comment('后台状态')->after('admin_remark');
+                $table->string('backend_status', 50)->nullable()->default('')->comment('后台状态')->after('admin_remark');
                 $table->index('backend_status');
             }
         });

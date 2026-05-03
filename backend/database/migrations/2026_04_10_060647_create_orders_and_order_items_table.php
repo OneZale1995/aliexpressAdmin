@@ -54,7 +54,7 @@ return new class extends Migration
             $table->json('raw_data')->nullable()->comment('原始API数据');
             $table->timestamps();
 
-            $table->foreign('shop_id')->references('id')->on('shops')->onDelete('cascade');
+            $table->index('shop_id');
             $table->index('status');
             $table->index('order_display_status');
             $table->index('ae_created_at');
@@ -82,7 +82,7 @@ return new class extends Migration
             $table->string('logistic_storage_type', 20)->default('');
             $table->timestamps();
 
-            $table->foreign('order_id')->references('id')->on('orders')->onDelete('cascade');
+            $table->index('order_id');
             $table->index('ae_item_id');
         });
     }

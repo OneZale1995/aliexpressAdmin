@@ -82,6 +82,7 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     Route::post('/dict-data/update', [DictController::class, 'dataUpdate']);
     Route::post('/dict-data/delete', [DictController::class, 'dataDestroy']);
     Route::post('/dict/get', [DictController::class, 'getByCode']);
+    Route::post('/dict/batch', [DictController::class, 'batchGetByCode']);
 
     // 操作日志
     Route::post('/operation-logs/list', [OperationLogController::class, 'index']);

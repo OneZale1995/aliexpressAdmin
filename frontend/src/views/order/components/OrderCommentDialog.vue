@@ -17,20 +17,8 @@
       </el-form-item>
       <el-row :gutter="12">
         <el-col :span="12">
-          <el-form-item label="连连费用">
-            <el-input v-model.number="commentTemp.lianlian_fee" type="number" min="0" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
           <el-form-item label="采购额">
             <el-input v-model.number="commentTemp.purchase_amount" type="number" min="0" @input="$emit('recalc-eub-logistics-fee')" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-      <el-row :gutter="12">
-        <el-col :span="12">
-          <el-form-item label="快递费">
-            <el-input v-model.number="commentTemp.express_fee" type="number" min="0" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
@@ -39,10 +27,6 @@
           </el-form-item>
         </el-col>
       </el-row>
-      <el-form-item label="物流模板">
-        <div class="readonly-text">{{ logisticsTemplateLabel }}</div>
-        <div class="form-tip">物流模板由发货流程自动决定，这里不再手动选择。</div>
-      </el-form-item>
       <el-row v-if="commentTemp.logistics_template === 'offline_epacket'" :gutter="12">
         <el-col :span="12">
           <el-form-item label="亚马逊比例%">
@@ -133,21 +117,6 @@ export default {
         this.$emit('update:visible', value)
       }
     },
-    logisticsTemplateLabel() {
-      if (this.commentTemp.logistics_template === 'offline_epacket') {
-        return '线下-E邮宝'
-      }
-
-      if (this.commentTemp.logistics_template === 'offline_leiyi') {
-        return '线下-雷翼/邮政'
-      }
-
-      if (this.commentTemp.logistics_template === 'online') {
-        return '线上'
-      }
-
-      return this.commentTemp.logistics_template || '-'
-    }
   },
   methods: {
     handlePurchaseImageUploadSuccess(response) {
@@ -161,14 +130,4 @@ export default {
 </script>
 
 <style scoped>
-.readonly-text {
-  color: #606266;
-  line-height: 32px;
-}
-
-.form-tip {
-  color: #909399;
-  font-size: 12px;
-  line-height: 1.6;
-}
 </style>

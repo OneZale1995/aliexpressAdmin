@@ -16,7 +16,7 @@ return new class extends Migration
             $table->text('description')->nullable()->comment('团队描述');
             $table->timestamps();
 
-            $table->foreign('admin_user_id')->references('id')->on('admin_users')->onDelete('cascade');
+            $table->index('admin_user_id');
         });
 
         // 团队成员表（采购人员）
@@ -26,8 +26,8 @@ return new class extends Migration
             $table->unsignedBigInteger('user_id');
             $table->timestamps();
 
-            $table->foreign('team_id')->references('id')->on('teams')->onDelete('cascade');
-            $table->foreign('user_id')->references('id')->on('admin_users')->onDelete('cascade');
+            $table->index('team_id');
+            $table->index('user_id');
             $table->unique(['team_id', 'user_id']);
         });
     }

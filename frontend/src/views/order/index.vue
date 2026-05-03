@@ -160,7 +160,7 @@ import {
   updateOrderBackendFields
 } from '@/api/order'
 import { fetchShopList } from '@/api/shop'
-import { fetchDictByCode } from '@/api/system'
+import { fetchDictBatch } from '@/api/system'
 import Pagination from '@/components/Pagination'
 import { getToken } from '@/utils/auth'
 import OrderCommentDialog from './components/OrderCommentDialog'
@@ -327,25 +327,24 @@ export default {
     },
     async loadOrderDicts() {
       const targets = Object.values(ORDER_DICT_CODE)
-      const map = {}
-      const optionsByCode = {}
-
-      await Promise.all(targets.map(code => {
-        return fetchDictByCode(code).then(res => {
-          const items = (res.data || []).filter(item => Number(item.status) === 1)
+      try {
+        const res = await fetchDictBatch(targets)
+        const rawMap = res.data || {}
+        const map = {}
+        const optionsByCode = {}
+        targets.forEach(code => {
+          const items = (rawMap[code] || []).filter(item => Number(item.status) === 1)
           map[code] = buildDictLabelMap(items)
           optionsByCode[code] = buildDictOptions(items)
-        }).catch(() => {
-          map[code] = {}
-          optionsByCode[code] = []
         })
-      }))
-
-      this.dictLabelMap = map
-      this.statusTabs = buildStatusTabs(optionsByCode[ORDER_DICT_CODE.orderDisplayStatus] || [])
-      this.issueStatusOptions = optionsByCode[ORDER_DICT_CODE.issueStatus] || []
-      this.backendStatusOptions = optionsByCode[ORDER_DICT_CODE.backendStatus] || []
-      this.backendStatusTabs = buildBackendStatusTabs(this.backendStatusOptions)
+        this.dictLabelMap = map
+        this.statusTabs = buildStatusTabs(optionsByCode[ORDER_DICT_CODE.orderDisplayStatus] || [])
+        this.issueStatusOptions = optionsByCode[ORDER_DICT_CODE.issueStatus] || []
+        this.backendStatusOptions = optionsByCode[ORDER_DICT_CODE.backendStatus] || []
+        this.backendStatusTabs = buildBackendStatusTabs(this.backendStatusOptions)
+      } catch {
+        this.dictLabelMap = {}
+      }
     },
     getStatusCounts() {
       fetchOrderStatusCounts({

@@ -173,6 +173,10 @@ export function fetchDictByCode(code) {
   return request({ url: '/dict/get', method: 'post', data: { code } })
 }
 
+export function fetchDictBatch(codes) {
+  return request({ url: '/dict/batch', method: 'post', data: { codes } })
+}
+
 // ========== 个人中心 ==========
 export function updateProfile(data) {
   return request({ url: '/profile/update', method: 'post', data })

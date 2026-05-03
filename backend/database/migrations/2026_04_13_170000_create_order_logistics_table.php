@@ -11,7 +11,7 @@ return new class extends Migration
     {
         Schema::create('order_logistics', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('order_id')->constrained('orders')->cascadeOnDelete();
+            $table->unsignedBigInteger('order_id');
             $table->boolean('is_primary')->default(true)->comment('是否主物流记录');
             $table->string('logistics_mode', 20)->nullable()->comment('FBS/DBS');
             $table->string('provider_code', 50)->nullable()->comment('物流渠道编码');

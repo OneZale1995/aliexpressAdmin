@@ -28,13 +28,6 @@
           <span v-else>-</span>
         </template>
       </el-table-column>
-      <el-table-column label="默认设置" align="center" min-width="200">
-        <template slot-scope="{row}">
-          <div v-if="row.logistics_template_id">默认物流模板ID：<el-link type="primary">{{ row.logistics_template_id }}</el-link></div>
-          <div v-if="row.logistics_route">默认物流线路：{{ row.logistics_route }}</div>
-          <span v-if="!row.logistics_template_id && !row.logistics_route">-</span>
-        </template>
-      </el-table-column>
       <el-table-column label="所属团队" align="center" width="120">
         <template slot-scope="{row}">
           {{ row.team ? row.team.name : '-' }}
@@ -76,23 +69,6 @@
         </el-form-item>
         <el-form-item label="访问令牌">
           <el-input v-model="temp.access_token" type="textarea" :rows="4" />
-        </el-form-item>
-        <el-form-item label="默认运费">
-          <el-input v-model="temp.default_shipping_fee" type="number" />
-        </el-form-item>
-        <el-form-item label="物流模板">
-          <div style="display: flex; align-items: center;">
-            <el-select v-model="temp.logistics_template_id" placeholder="请选择" style="flex: 1;" clearable>
-              <el-option label="暂无模板" value="" />
-            </el-select>
-            <el-button type="primary" size="small" style="margin-left: 10px;">更新</el-button>
-          </div>
-        </el-form-item>
-        <el-form-item label="物流线路">
-          <el-select v-model="temp.logistics_route" placeholder="请选择" style="width: 100%;" clearable>
-            <el-option label="KZCIS专线(HF)" value="KZCIS专线(HF)" />
-            <el-option label="官方邮政" value="官方邮政" />
-          </el-select>
         </el-form-item>
         <el-form-item v-if="isSuperAdmin" label="所属团队" prop="team_id">
           <el-select v-model="temp.team_id" filterable placeholder="请选择团队" style="width: 100%;">
@@ -140,10 +116,6 @@ export default {
         email: '',
         status: 1,
         access_token: '',
-        default_shipping_fee: 0,
-        logistics_template_id: '',
-        logistics_template_name: '',
-        logistics_route: '',
         team_id: undefined,
         user_id: undefined,
         updated_at: ''
@@ -205,10 +177,6 @@ export default {
         email: '',
         status: 1,
         access_token: '',
-        default_shipping_fee: 0,
-        logistics_template_id: '',
-        logistics_template_name: '',
-        logistics_route: '',
         team_id: undefined,
         user_id: undefined,
         updated_at: ''
@@ -255,10 +223,6 @@ export default {
             email: this.temp.email,
             status: this.temp.status,
             access_token: this.temp.access_token,
-            default_shipping_fee: this.temp.default_shipping_fee,
-            logistics_template_id: this.temp.logistics_template_id,
-            logistics_template_name: this.temp.logistics_template_name,
-            logistics_route: this.temp.logistics_route,
             team_id: this.temp.team_id,
             user_id: this.temp.user_id
           }

@@ -68,6 +68,7 @@ class UserController extends Controller
         $request->validate([
             'username' => 'required|string|max:100|unique:admin_users,username,' . $user->id,
             'nickname' => 'nullable|string|max:191',
+            'password' => 'nullable|string|min:6',
             'status' => 'in:0,1',
             'role_ids' => 'array',
         ]);

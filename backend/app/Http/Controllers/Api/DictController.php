@@ -36,6 +36,7 @@ class DictController extends Controller
         ]);
 
         $type = DictType::create($request->only(['name', 'code', 'status', 'description']));
+        DictType::clearCache($type->code);
 
         return $this->success($type, '创建成功');
     }
@@ -43,6 +44,7 @@ class DictController extends Controller
     public function typeUpdate(Request $request)
     {
         $dictType = DictType::findOrFail($request->id);
+        $oldCode = $dictType->code;
 
         $request->validate([
             'name' => 'required|string',
@@ -50,6 +52,10 @@ class DictController extends Controller
         ]);
 
         $dictType->update($request->only(['name', 'code', 'status', 'description']));
+        DictType::clearCache($oldCode);
+        if ($dictType->code !== $oldCode) {
+            DictType::clearCache($dictType->code);
+        }
 
         return $this->success($dictType, '更新成功');
     }
@@ -62,6 +68,7 @@ class DictController extends Controller
             return $this->error('该字典类型下存在数据，无法删除');
         }
 
+        DictType::clearCache($dictType->code);
         $dictType->delete();
         return $this->success(null, '删除成功');
     }
@@ -93,6 +100,8 @@ class DictController extends Controller
             'dict_type_id', 'label', 'value', 'status', 'sort', 'description',
         ]));
 
+        $this->clearDictCacheByDataId($data->dict_type_id);
+
         return $this->success($data, '创建成功');
     }
 
@@ -108,14 +117,26 @@ class DictController extends Controller
             'label', 'value', 'status', 'sort', 'description',
         ]));
 
+        $this->clearDictCacheByDataId($dictData->dict_type_id);
+
         return $this->success($dictData, '更新成功');
     }
 
     public function dataDestroy(Request $request)
     {
         $dictData = DictData::findOrFail($request->id);
+        $typeId = $dictData->dict_type_id;
         $dictData->delete();
+        $this->clearDictCacheByDataId($typeId);
         return $this->success(null, '删除成功');
+    }
+
+    private function clearDictCacheByDataId(int $typeId): void
+    {
+        $type = DictType::find($typeId);
+        if ($type) {
+            DictType::clearCache($type->code);
+        }
     }
 
     // 根据字典编码获取数据（前端下拉框使用）
@@ -123,5 +144,12 @@ class DictController extends Controller
     {
         $items = DictType::getItems($request->code);
         return $this->success($items);
+    }
+
+    // 批量获取多个字典编码的数据
+    public function batchGetByCode(Request $request)
+    {
+        $codes = $request->input('codes', []);
+        return $this->success(DictType::getBatchItems($codes));
     }
 }

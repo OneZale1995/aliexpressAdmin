@@ -26,7 +26,7 @@ class PermissionController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'name' => 'required|string|max:100|unique:permissions',
+            'name' => 'required|string|max:100|unique:admin_permissions',
             'display_name' => 'required|string|max:100',
             'parent_id' => 'integer',
             'description' => 'nullable|string|max:191',
@@ -51,7 +51,7 @@ class PermissionController extends Controller
         $permission = Permission::findOrFail($request->id);
 
         $request->validate([
-            'name' => 'required|string|max:100|unique:permissions,name,' . $permission->id,
+            'name' => 'required|string|max:100|unique:admin_permissions,name,' . $permission->id,
             'display_name' => 'required|string|max:100',
             'parent_id' => 'integer',
             'description' => 'nullable|string|max:191',

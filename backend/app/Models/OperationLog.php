@@ -11,6 +11,10 @@ class OperationLog extends Model
     protected $table = 'admin_operation_logs';
     protected $fillable = [
         'user_id', 'user_name', 'method', 'path', 'ip',
-        'input', 'status_code', 'response', 'duration',
+        'input', 'status_code', 'business_code', 'is_success', 'response', 'duration',
+    ];
+
+    protected $casts = [
+        'is_success' => 'boolean',
     ];
 }

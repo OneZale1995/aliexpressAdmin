@@ -17,6 +17,7 @@ class LogOperation
         'api/login-logs/*',
         'api/export',
         'api/dict/get',
+        'api/orders/sync-progress',
     ];
 
     public function handle(Request $request, Closure $next): Response
@@ -39,8 +40,16 @@ class LogOperation
         $input = $request->except(['password', 'password_confirmation']);
         $responseContent = $response->getContent();
 
-        // 截断过长的响应内容
-        if (strlen($responseContent) > 2000) {
+        $businessCode = null;
+        $isSuccess = true;
+        $decoded = json_decode($responseContent, true);
+        if (is_array($decoded) && array_key_exists('code', $decoded)) {
+            $businessCode = (int) $decoded['code'];
+            $isSuccess = $businessCode === 20000;
+        }
+
+        // 成功请求截断过长的响应内容，失败请求保留完整内容用于排查
+        if ($isSuccess && strlen($responseContent) > 2000) {
             $responseContent = mb_substr($responseContent, 0, 2000) . '...';
         }
 
@@ -53,6 +62,8 @@ class LogOperation
                 'ip' => $request->ip(),
                 'input' => json_encode($input, JSON_UNESCAPED_UNICODE),
                 'status_code' => $response->getStatusCode(),
+                'business_code' => $businessCode,
+                'is_success' => $isSuccess,
                 'response' => $responseContent,
                 'duration' => $duration,
             ]);

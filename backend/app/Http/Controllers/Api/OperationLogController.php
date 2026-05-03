@@ -27,6 +27,14 @@ class OperationLogController extends Controller
             $query->where('method', $request->method);
         }
 
+        if ($request->has('is_success') && $request->is_success !== '' && $request->is_success !== null) {
+            $query->where('is_success', (bool) $request->is_success);
+        }
+
+        if ($request->filled('min_duration')) {
+            $query->where('duration', '>=', (int) $request->min_duration);
+        }
+
         if ($request->filled('start_date') && $request->filled('end_date')) {
             $query->whereBetween('created_at', [$request->start_date, $request->end_date . ' 23:59:59']);
         }

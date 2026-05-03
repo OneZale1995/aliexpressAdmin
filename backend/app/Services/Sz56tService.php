@@ -135,6 +135,8 @@ class Sz56tService
         $this->thirdPartyLog()->info('Sz56t createOrder request', [
             'order_id' => $order->ae_order_id,
             'product_id' => $productId,
+            'url' => $this->apiUrl . '/createOrderApi.htm',
+            'param' => $param,
         ]);
 
         try {
@@ -187,6 +189,8 @@ class Sz56tService
         } catch (\Exception $e) {
             $this->thirdPartyLog()->error('Sz56t createOrder exception', [
                 'order_id' => $order->ae_order_id,
+                'product_id' => $productId,
+                'param' => $param,
                 'message' => $e->getMessage(),
             ]);
             return ['success' => false, 'message' => $e->getMessage()];

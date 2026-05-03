@@ -269,6 +269,7 @@ class ChinaPostService
             'version' => $openVersion,
             'product_type' => $productType,
             'biz_product_no' => $bizProductNo,
+            'logistics_interface' => $logisticsInterface,
         ]);
 
         try {
@@ -319,6 +320,9 @@ class ChinaPostService
         } catch (\Exception $e) {
             $this->thirdPartyLog()->error('ChinaPost openApi createOrder exception', [
                 'order_id' => $order->ae_order_id,
+                'url' => $url,
+                'params' => array_diff_key($params, ['authorization' => 1, 'logitcsInterface' => 1]),
+                'logistics_interface' => $logisticsInterface,
                 'message' => $e->getMessage(),
             ]);
             return ['success' => false, 'message' => $e->getMessage(), 'request' => $request];
@@ -384,6 +388,7 @@ class ChinaPostService
             'url' => $url,
             'api_code' => $apiCode,
             'sender_no' => $senderNo,
+            'logistics_interface' => $logisticsInterface,
         ]);
 
         try {
@@ -428,6 +433,8 @@ class ChinaPostService
         } catch (\Exception $e) {
             $this->thirdPartyLog()->error('ChinaPost allocateBarcode exception', [
                 'order_id' => $order->ae_order_id,
+                'url' => $url,
+                'logistics_interface' => $logisticsInterface,
                 'message' => $e->getMessage(),
             ]);
             return ['success' => false, 'message' => $e->getMessage()];

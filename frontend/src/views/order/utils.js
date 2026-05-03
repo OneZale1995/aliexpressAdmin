@@ -371,16 +371,16 @@ export function buildSz56tItemsFromOrder(order, fallbackWeight = 100) {
   return orderItems.map(item => createDefaultSz56tItem({
     sku: item.name || '商品',
     invoice_title: item.name || 'Product',
-    invoice_amount: Number(item.item_price || 0) * Number(item.quantity || 1),
+    invoice_amount: '',
     invoice_pcs: Number(item.quantity || 1),
     invoice_weight: defaultUnitWeight,
     sku_code: item.sku_code || '',
     hs_code: item.hs_code || '',
     transaction_url: order.trade_order_url || order.order_transactionurl || '',
-    invoice_currency: item.currency || 'USD',
+    invoice_currency: 'USD',
     invoiceunit_code: 'PCS',
     origin_country: 'CN',
-    invoice_export_currency: item.currency || 'USD',
+    invoice_export_currency: 'USD',
     invoice_imgurl: item.img_url || ''
   }))
 }
@@ -424,12 +424,12 @@ export function buildChinaPostItemsFromOrder(order, fallbackWeight = 100) {
     cargo_name_en: item.name || 'Product',
     cargo_type_name: item.name || '商品',
     cargo_type_name_en: item.name || 'Product',
-    cost: Number(item.item_price || 0) * Number(item.quantity || 1),
-    cargo_value: Number(item.item_price || 0),
+    cost: '',
+    cargo_value: '',
     cargo_quantity: Number(item.quantity || 1),
     cargo_weight: defaultUnitWeight,
     cargo_origin_name: 'CN',
-    cargo_currency: item.currency || 'USD',
+    cargo_currency: 'USD',
     unit: '个'
   }))
 }

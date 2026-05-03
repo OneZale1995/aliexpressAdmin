@@ -121,11 +121,11 @@
           <el-table-column label="物品中文名" min-width="150"><template slot-scope="{ row }"><el-input v-model="row.cargo_name" size="mini" /></template></el-table-column>
           <el-table-column label="物品英文名" min-width="150"><template slot-scope="{ row }"><el-input v-model="row.cargo_name_en" size="mini" /></template></el-table-column>
           <el-table-column label="单位申报重量(g)" width="140"><template slot-scope="{ row }"><el-input-number v-model="row.cargo_weight" :min="0" :step="1" size="mini" style="width:100%;" /></template></el-table-column>
-          <el-table-column label="单位申报价值" width="130"><template slot-scope="{ row }"><el-input-number v-model="row.cost" :min="0" :step="0.01" :precision="2" size="mini" style="width:100%;" /></template></el-table-column>
+          <el-table-column label="单位申报价值" width="130"><template slot-scope="{ row }"><el-input v-model="row.cost" size="mini" placeholder="请填写" /></template></el-table-column>
           <el-table-column label="数量" width="110"><template slot-scope="{ row }"><el-input-number v-model="row.cargo_quantity" :min="1" :step="1" size="mini" style="width:100%;" /></template></el-table-column>
           <el-table-column label="原产地" width="110"><template slot-scope="{ row }"><el-input v-model="row.cargo_origin_name" size="mini" /></template></el-table-column>
           <el-table-column label="计量单位" width="110"><template slot-scope="{ row }"><el-input v-model="row.unit" size="mini" /></template></el-table-column>
-          <el-table-column label="操作" width="90" fixed="right"><template slot-scope="{ $index }"><el-button type="text" size="mini" @click="removeChinaPostItem($index)">删除</el-button></template></el-table-column>
+          <el-table-column label="操作" width="90"><template slot-scope="{ $index }"><el-button type="text" size="mini" @click="removeChinaPostItem($index)">删除</el-button></template></el-table-column>
         </el-table>
         <div class="sz56t-item-actions">
           <el-button size="mini" plain icon="el-icon-plus" @click="addChinaPostItem">添加内件</el-button>

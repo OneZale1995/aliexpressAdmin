@@ -9,6 +9,16 @@
         <el-option label="DELETE" value="DELETE" />
         <el-option label="PATCH" value="PATCH" />
       </el-select>
+      <el-select v-model="listQuery.is_success" placeholder="响应状态" clearable style="width: 120px" class="filter-item">
+        <el-option label="成功" :value="1" />
+        <el-option label="失败" :value="0" />
+      </el-select>
+      <el-select v-model="listQuery.min_duration" placeholder="慢请求" clearable style="width: 130px" class="filter-item">
+        <el-option label=">500ms" :value="500" />
+        <el-option label=">1s" :value="1000" />
+        <el-option label=">3s" :value="3000" />
+        <el-option label=">5s" :value="5000" />
+      </el-select>
       <el-date-picker v-model="dateRange" type="daterange" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" class="filter-item" value-format="yyyy-MM-dd" style="width: 280px;" />
       <el-button class="filter-item" type="primary" icon="el-icon-search" @click="handleFilter">搜索</el-button>
       <el-button class="filter-item" type="danger" icon="el-icon-delete" @click="handleClear">清除日志</el-button>
@@ -23,8 +33,18 @@
         </template>
       </el-table-column>
       <el-table-column label="请求路径" prop="path" />
+      <el-table-column label="状态" align="center" width="80">
+        <template slot-scope="{row}">
+          <el-tag :type="row.is_success ? 'success' : 'danger'" size="mini">{{ row.is_success ? '成功' : '失败' }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="业务码" prop="business_code" align="center" width="90" />
+      <el-table-column label="耗时" align="center" width="100">
+        <template slot-scope="{row}">
+          <span :style="{ color: row.duration > 3000 ? '#F56C6C' : row.duration > 1000 ? '#E6A23C' : '' }">{{ row.duration }}ms</span>
+        </template>
+      </el-table-column>
       <el-table-column label="IP" prop="ip" width="140" align="center" />
-      <el-table-column label="耗时(ms)" prop="duration" width="100" align="center" />
       <el-table-column label="操作时间" prop="created_at" width="180" align="center" />
       <el-table-column label="操作" align="center" width="120">
         <template slot-scope="{row}">
@@ -42,6 +62,10 @@
         <el-descriptions-item label="IP地址">{{ detail.ip }}</el-descriptions-item>
         <el-descriptions-item label="请求方法">{{ detail.method }}</el-descriptions-item>
         <el-descriptions-item label="耗时">{{ detail.duration }}ms</el-descriptions-item>
+        <el-descriptions-item label="业务码">{{ detail.business_code }}</el-descriptions-item>
+        <el-descriptions-item label="状态">
+          <el-tag :type="detail.is_success ? 'success' : 'danger'" size="mini">{{ detail.is_success ? '成功' : '失败' }}</el-tag>
+        </el-descriptions-item>
         <el-descriptions-item label="请求路径" :span="2">{{ detail.path }}</el-descriptions-item>
         <el-descriptions-item label="请求参数" :span="2">
           <pre style="margin:0;white-space:pre-wrap;word-break: break-all;">{{ formatJson(detail.input) }}</pre>
@@ -66,7 +90,7 @@ export default {
       list: [],
       total: 0,
       listLoading: true,
-      listQuery: { page: 1, limit: 20, user_name: '', path: '', method: '', start_date: '', end_date: '' },
+      listQuery: { page: 1, limit: 20, user_name: '', path: '', method: '', is_success: '', min_duration: '', start_date: '', end_date: '' },
       dateRange: [],
       detail: {},
       detailVisible: false

@@ -39,7 +39,7 @@ class AliExpressService
         }
 
         $page = 1;
-        $pageSize = 50;
+        $pageSize = 20;
         $synced = 0;
 
         do {
@@ -57,7 +57,10 @@ class AliExpressService
                     'Content-Type' => 'application/json',
                 ])
                     ->withOptions(['verify' => $this->verifySsl])
-                    ->timeout(30)
+                    ->timeout(60)
+                    ->retry(2, 2000, function (\Exception $e) {
+                        return $e instanceof \Illuminate\Http\Client\ConnectionException;
+                    })
                     ->post($this->baseUrl . '/seller-api/v1/order/get-order-list', $body);
 
                 $data = $response->json();
@@ -82,6 +85,7 @@ class AliExpressService
             } catch (\Exception $e) {
                 $this->thirdPartyLog()->error('AliExpress sync exception', [
                     'shop_id' => $shop->id,
+                    'page' => $page,
                     'message' => $e->getMessage(),
                 ]);
                 return ['synced' => $synced, 'error' => $e->getMessage()];

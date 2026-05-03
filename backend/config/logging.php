@@ -71,6 +71,7 @@ return [
             'level' => env('LOG_LEVEL', 'debug'),
             'days' => env('LOG_DAILY_DAYS', 14),
             'replace_placeholders' => true,
+            'permission' => 0664,
         ],
 
         'third_party' => [
@@ -79,6 +80,7 @@ return [
             'level' => env('THIRD_PARTY_LOG_LEVEL', env('LOG_LEVEL', 'debug')),
             'days' => env('THIRD_PARTY_LOG_DAYS', env('LOG_DAILY_DAYS', 14)),
             'replace_placeholders' => true,
+            'permission' => 0664,
         ],
 
         'slack' => [

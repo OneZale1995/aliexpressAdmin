@@ -1,7 +1,7 @@
 <template>
   <el-dialog title="雷翼(sz56t) 发货" :visible.sync="dialogVisible" :width="dialogWidth" top="5vh">
     <el-alert
-      title="DBS 这里只记录本地实际发货。完成后请回订单列表点击"发送到速卖通"。"
+      title="DBS 这里只记录本地实际发货。完成后请回订单列表点击'发送到速卖通'。"
       type="info"
       :closable="false"
       show-icon
@@ -65,10 +65,10 @@
           <el-table-column label="配货" min-width="140"><template slot-scope="{ row }"><el-input v-model="row.sku_code" size="mini" placeholder="配货选填" /></template></el-table-column>
           <el-table-column width="160"><template slot="header"><span class="sz56t-required-header">* 单个商品重量(克)</span></template><template slot-scope="{ row }"><el-input-number v-model="row.invoice_weight" :min="1" :step="1" size="mini" style="width:100%;" /></template></el-table-column>
           <el-table-column width="110"><template slot="header"><span class="sz56t-required-header">* 产品数量</span></template><template slot-scope="{ row }"><el-input-number v-model="row.invoice_pcs" :min="1" :step="1" size="mini" style="width:100%;" /></template></el-table-column>
-          <el-table-column width="140"><template slot="header"><span class="sz56t-required-header">* 总金额USD</span></template><template slot-scope="{ row }"><el-input-number v-model="row.invoice_amount" :min="0.01" :step="0.01" :precision="2" size="mini" style="width:100%;" /></template></el-table-column>
+          <el-table-column width="140"><template slot="header"><span class="sz56t-required-header">* 总金额</span></template><template slot-scope="{ row }"><el-input v-model="row.invoice_amount" size="mini" placeholder="请填写金额" /></template></el-table-column>
           <el-table-column label="出口海关编码" min-width="150"><template slot-scope="{ row }"><el-input v-model="row.hs_code" size="mini" placeholder="选填" /></template></el-table-column>
           <el-table-column label="申报币种" width="120"><template slot-scope="{ row }"><el-select v-model="row.invoice_currency" size="mini" style="width:100%;"><el-option v-for="item in sz56tCurrencyOptions" :key="item.value" :label="item.label" :value="item.value" /></el-select></template></el-table-column>
-          <el-table-column label="操作" width="90" fixed="right"><template slot-scope="{ $index }"><el-button type="text" size="mini" @click="removeSz56tItem($index)">删除</el-button></template></el-table-column>
+          <el-table-column label="操作" width="90"><template slot-scope="{ $index }"><el-button type="text" size="mini" @click="removeSz56tItem($index)">删除</el-button></template></el-table-column>
         </el-table>
         <div class="sz56t-item-actions"><el-button size="mini" plain icon="el-icon-plus" @click="addSz56tItem">新增申报项</el-button></div>
       </template>
@@ -263,7 +263,7 @@
           <el-table-column label="配货信息" min-width="140"><template slot-scope="{ row }"><el-input v-model="row.sku_code" size="mini" /></template></el-table-column>
           <el-table-column label="海关编码" min-width="130"><template slot-scope="{ row }"><el-input v-model="row.hs_code" size="mini" /></template></el-table-column>
           <el-table-column label="数量" width="90"><template slot-scope="{ row }"><el-input-number v-model="row.invoice_pcs" :min="1" :step="1" size="mini" /></template></el-table-column>
-          <el-table-column label="申报金额" width="120"><template slot-scope="{ row }"><el-input-number v-model="row.invoice_amount" :min="0.01" :step="0.01" :precision="2" size="mini" /></template></el-table-column>
+          <el-table-column label="申报金额" width="120"><template slot-scope="{ row }"><el-input v-model="row.invoice_amount" size="mini" placeholder="请填写" /></template></el-table-column>
           <el-table-column label="单件重(克)" width="130"><template slot-scope="{ row }"><el-input-number v-model="row.invoice_weight" :min="1" :step="1" size="mini" /></template></el-table-column>
           <el-table-column label="币种" width="100"><template slot-scope="{ row }"><el-select v-model="row.invoice_currency" size="mini" style="width:100%;"><el-option v-for="item in sz56tCurrencyOptions" :key="item.value" :label="item.label" :value="item.value" /></el-select></template></el-table-column>
           <el-table-column label="原产国" width="170"><template slot-scope="{ row }"><el-select v-model="row.origin_country" filterable clearable default-first-option size="mini" placeholder="原产国" style="width:100%;"><el-option v-for="item in sz56tCountryOptions" :key="item.value || 'origin-country-empty'" :label="item.label" :value="item.value" /></el-select></template></el-table-column>

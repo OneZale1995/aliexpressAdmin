@@ -9,7 +9,10 @@
       <div v-if="syncProgress.current_shop_name">当前店铺：{{ syncProgress.current_shop_name }}</div>
     </div>
 
-    <el-table :data="syncProgress.details || []" size="mini" border style="margin-top: 14px;">
+    <div v-if="allDetails.length > displayDetails.length" style="margin-top: 14px; color: #909399; font-size: 12px;">
+      共 {{ allDetails.length }} 个店铺，仅显示最近 {{ displayDetails.length }} 个
+    </div>
+    <el-table :data="displayDetails" size="mini" border style="margin-top: 8px;">
       <el-table-column label="店铺" prop="shop_name" min-width="120" />
       <el-table-column label="同步条数" prop="synced" width="100" align="center" />
       <el-table-column label="结果" min-width="220">
@@ -54,6 +57,15 @@ export default {
       set(value) {
         this.$emit('update:visible', value)
       }
+    },
+    allDetails() {
+      return this.syncProgress.details || []
+    },
+    displayDetails() {
+      const failed = this.allDetails.filter(d => d.status === 'failed')
+      const others = this.allDetails.filter(d => d.status !== 'failed')
+      const remaining = Math.max(0, 10 - failed.length)
+      return [...failed, ...others.slice(-remaining)]
     }
   },
   methods: {

@@ -236,6 +236,7 @@ class ChinaPostService
         $apiCode = (string) ($request['apiCode'] ?? ($this->apiCodes['create_order'] ?? '110001'));
         $senderNo = (string) ($request['senderNo'] ?? '');
         $logisticsInterface = $request['logistics_interface'] ?? [];
+        $logisticsInterface = $this->sanitizePayload($logisticsInterface);
 
         $jsonContent = json_encode($logisticsInterface, JSON_UNESCAPED_UNICODE);
         $encryptedLogitcsInterface = $this->encryptLogitcsInterface($jsonContent, $this->digestKey);
@@ -992,6 +993,30 @@ class ChinaPostService
             $binary .= chr(((int) $byte) & 0xFF);
         }
         return $binary;
+    }
+
+    /**
+     * 递归清理 payload：移除 null 值，清理货物名称中的特殊字符。
+     */
+    protected function sanitizePayload(array $data): array
+    {
+        $result = [];
+        foreach ($data as $key => $value) {
+            if ($value === null) {
+                continue;
+            }
+            if (is_array($value)) {
+                $result[$key] = $this->sanitizePayload($value);
+            } elseif (is_string($value) && in_array($key, [
+                'cargo_name', 'cargo_name_en', 'cargo_type_name',
+                'cargo_type_name_en', 'cargo_description',
+            ], true)) {
+                $result[$key] = str_replace(['"', '\\', "\r", "\n", "\t"], '', $value);
+            } else {
+                $result[$key] = $value;
+            }
+        }
+        return $result;
     }
 
     /**

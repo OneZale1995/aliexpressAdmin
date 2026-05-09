@@ -1390,7 +1390,7 @@ class AliExpressService
             return null;
         }
         try {
-            return \Carbon\Carbon::parse($dateStr);
+            return \Carbon\Carbon::parse($dateStr)->setTimezone(config('app.timezone'));
         } catch (\Exception $e) {
             return null;
         }

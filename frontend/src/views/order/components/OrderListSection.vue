@@ -314,23 +314,20 @@ export default {
     },
     getItemSpec(item) {
       const skuAttrs = item.sku_attributes || {}
+      const sizeKeys = ['size', 'color', 'colour', '颜色', '尺码', '尺寸', 'цвет', 'размер', 'покрой']
       if (Object.keys(skuAttrs).length) {
-        return Object.entries(skuAttrs).map(([k, v]) => k + ': ' + v).join(' | ')
+        const entries = Object.entries(skuAttrs)
+          .filter(([k, v]) => v && sizeKeys.some(sk => k.toLowerCase().includes(sk)))
+          .map(([k, v]) => k + ': ' + v)
+        return entries.join(' | ')
       }
       const props = item.properties || item.properties_map || {}
       const specs = []
-      const sizeKeys = ['size', 'color', 'colour', '颜色', '尺码', '尺寸', 'цвет', 'размер', 'покрой']
       for (const [key, val] of Object.entries(props)) {
         const k = key.toLowerCase()
-        if (k.includes('package') || k.includes('упаковк')) continue
         if (sizeKeys.some(sk => k.includes(sk)) && val) {
           specs.push(key + ': ' + val)
         }
-      }
-      if (!specs.length) {
-        const sku = item.sku_code || ''
-        const match = sku.match(/-(\d{2,3})$/)
-        if (match) specs.push('尺码: ' + match[1])
       }
       return specs.join(' | ')
     },

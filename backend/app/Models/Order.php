@@ -24,7 +24,7 @@ class Order extends Model
         'admin_remark', 'backend_status', 'purchase_image', 'shipping_image',
         'purchase_date', 'shipping_date',
         'apply_qianze_at', 'ship_qianze_at',
-        'fully_prepared', 'shipping_fee', 'logistics_fee',
+        'fully_prepared', 'shipping_fee', 'logistics_fee', 'weight',
         'eub_amazon_ratio', 'eub_base_fee', 'calculated_logistics_fee', 'logistics_fee_override',
         'ae_created_at', 'ae_paid_at', 'ae_updated_at',
         'cut_off_date', 'shipping_deadline',

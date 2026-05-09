@@ -553,6 +553,7 @@ class OrderController extends Controller
             'shipping_date' => 'nullable|date',
             'purchase_amount' => 'nullable|numeric|min:0',
             'logistics_fee' => 'nullable|numeric|min:0',
+            'weight' => 'nullable|numeric|min:0',
             'apply_qianze_at' => 'nullable|date',
             'ship_qianze_at' => 'nullable|date',
         ]);
@@ -569,6 +570,7 @@ class OrderController extends Controller
             'shipping_date' => $request->input('shipping_date', $order->shipping_date),
             'purchase_amount' => $request->input('purchase_amount', $order->purchase_amount),
             'logistics_fee' => $request->input('logistics_fee', $order->logistics_fee),
+            'weight' => $request->input('weight', $order->weight),
             'apply_qianze_at' => $request->input('apply_qianze_at', $order->apply_qianze_at),
             'ship_qianze_at' => $request->input('ship_qianze_at', $order->ship_qianze_at),
         ];

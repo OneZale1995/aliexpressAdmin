@@ -412,6 +412,7 @@ const DEFAULT_COMMENT_TEMP = {
   shipping_date: '',
   purchase_amount: 0,
   logistics_fee: 0,
+  weight: null,
   logistics_template: '',
   apply_qianze_at: '',
   ship_qianze_at: ''

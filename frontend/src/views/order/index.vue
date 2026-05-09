@@ -482,6 +482,7 @@ export default {
         shipping_date: order.shipping_date || '',
         purchase_amount: order.purchase_amount || 0,
         logistics_fee: order.logistics_fee || 0,
+        weight: order.weight || null,
         logistics_template: order.logistics_template || '',
         apply_qianze_at: order.apply_qianze_at || '',
         ship_qianze_at: order.ship_qianze_at || ''

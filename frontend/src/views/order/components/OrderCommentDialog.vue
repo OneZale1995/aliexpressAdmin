@@ -23,7 +23,7 @@
         </el-col>
         <el-col :span="12">
           <el-form-item label="重量(kg)">
-            <el-input v-model.number="weight" type="number" min="0" placeholder="输入重量自动算物流费" @input="calcLogisticsFee" />
+            <el-input v-model.number="commentTemp.weight" type="number" min="0" placeholder="输入重量自动算物流费" @input="calcLogisticsFee" />
           </el-form-item>
         </el-col>
       </el-row>
@@ -95,9 +95,7 @@ export default {
     }
   },
   data() {
-    return {
-      weight: null
-    }
+    return {}
   },
   computed: {
     dialogVisible: {
@@ -111,15 +109,14 @@ export default {
   },
   watch: {
     visible(v) {
-      if (v) {
-        this.weight = null
-      }
+      if (!v) return
     }
   },
   methods: {
     calcLogisticsFee() {
-      if (this.weight && Number(this.weight) > 0) {
-        this.commentTemp.logistics_fee = Number((this.weight * 35 + 15).toFixed(2))
+      const w = Number(this.commentTemp.weight)
+      if (w > 0) {
+        this.commentTemp.logistics_fee = Number((w * 35 + 15).toFixed(2))
       }
     },
     handlePurchaseImageUploadSuccess(response) {

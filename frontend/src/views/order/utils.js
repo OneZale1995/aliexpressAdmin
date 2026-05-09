@@ -95,10 +95,11 @@ export function getStatusTagType(status) {
 }
 
 export function getLogisticsTemplateLabel(template) {
+  if (!template) return ''
   if (template === 'leiyi' || template === 'offline_leiyi') return '雷翼'
   if (template === 'chinapost' || template === 'offline_epacket') return '中国邮政'
   if (template === 'fbs' || template === 'online') return 'FBS'
-  return template || '-'
+  return template
 }
 
 export function buildDictLabelMap(dictItems = []) {

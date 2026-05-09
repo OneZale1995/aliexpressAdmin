@@ -115,7 +115,7 @@
 
           <div class="col-backend cell-block">
             <div class="meta-line"><span class="label">后台状态</span>{{ getBackendStatusLabel(order.backend_status) }}</div>
-            <div class="meta-line"><span class="label">物流模板</span>{{ getLogisticsTemplateLabel(order.logistics_template) }}</div>
+            <div class="meta-line" v-if="getLogisticsTemplateLabel(order.logistics_template)"><span class="label">物流模板</span>{{ getLogisticsTemplateLabel(order.logistics_template) }}</div>
             <div class="meta-line"><span class="label">采购日期</span>{{ order.purchase_date || '-' }}</div>
             <div class="meta-line"><span class="label">发货日期</span>{{ order.shipping_date || '-' }}</div>
             <div class="meta-line"><span class="label">后台备注</span><span class="clip-text">{{ order.admin_remark || '-' }}</span></div>

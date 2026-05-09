@@ -104,9 +104,9 @@
 
           <div class="col-amount cell-block">
             <div class="meta-line"><span class="label">销售额</span><span class="strong">{{ Number(order.total_amount || 0).toFixed(2) }}</span><el-button type="text" size="mini" icon="el-icon-copy-document" class="inline-copy-btn" @click="$emit('copy-text', Number(order.total_amount || 0).toFixed(2))" /></div>
-            <div class="meta-line"><span class="label">预估回款</span>{{ (Number(order.total_amount || 0) * 0.92).toFixed(2) }}</div>
             <div class="meta-line"><span class="label">手续费</span>{{ calcFee(order) }}</div>
             <div class="meta-line"><span class="label">回款</span>{{ calcTotalBack(order) }}</div>
+            <div class="meta-line"><span class="label">预估回款</span>{{ (Number(order.total_amount || 0) * 0.92).toFixed(2) }}<span class="text-muted" style="font-size:11px;margin-left:4px;">(售价×0.92)</span></div>
             <div class="meta-line"><span class="label">采购</span>{{ Number(order.purchase_amount || 0).toFixed(2) }}<el-button type="text" size="mini" icon="el-icon-copy-document" class="inline-copy-btn" @click="$emit('copy-text', Number(order.purchase_amount || 0).toFixed(2))" /></div>
             <div class="meta-line"><span class="label">物流费</span>{{ Number(order.logistics_fee || 0).toFixed(2) }}</div>
             <div class="meta-line"><span class="label">利润</span><span :class="calcProfit(order) >= 0 ? 'text-success' : 'text-danger'">{{ Number(calcProfit(order) || 0).toFixed(2) }}</span></div>

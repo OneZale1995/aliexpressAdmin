@@ -1785,9 +1785,21 @@ export default {
       })
     },
     copyText(text) {
-      navigator.clipboard.writeText(text).then(() => {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+          this.$message.success('已复制')
+        })
+      } else {
+        const textarea = document.createElement('textarea')
+        textarea.value = text
+        textarea.style.position = 'fixed'
+        textarea.style.opacity = '0'
+        document.body.appendChild(textarea)
+        textarea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textarea)
         this.$message.success('已复制')
-      })
+      }
     },
     toggleSelect(id) {
       const index = this.selectedOrders.indexOf(id)

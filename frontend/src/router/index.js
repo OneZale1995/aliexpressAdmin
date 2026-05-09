@@ -120,6 +120,12 @@ export const asyncRoutes = [
         component: () => import('@/views/order/statistics'),
         name: 'OrderStatistics',
         meta: { title: '订单统计', icon: 'el-icon-data-analysis' }
+      },
+      {
+        path: 'customs-product',
+        component: () => import('@/views/system/customs-product'),
+        name: 'CustomsProduct',
+        meta: { title: '报关商品', icon: 'el-icon-goods' }
       }
     ]
   },

@@ -27,6 +27,10 @@
               <div class="stat-label">订单数</div>
               <div class="stat-value">{{ statistics.daily.totals.total_orders || 0 }}</div>
             </div>
+            <div class="stat-card">
+              <div class="stat-label">件数</div>
+              <div class="stat-value">{{ statistics.daily.totals.total_items || 0 }}</div>
+            </div>
             <div class="stat-card success">
               <div class="stat-label">销售额</div>
               <div class="stat-value">{{ formatMoney(statistics.daily.totals.total_sales) }}</div>
@@ -51,6 +55,10 @@
             <div class="stat-card">
               <div class="stat-label">实发订单</div>
               <div class="stat-value">{{ statistics.daily.shipped_totals.total_orders || 0 }}</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">实发件数</div>
+              <div class="stat-value">{{ statistics.daily.shipped_totals.total_items || 0 }}</div>
             </div>
             <div class="stat-card success">
               <div class="stat-label">实发销售额</div>
@@ -84,6 +92,10 @@
               <div class="stat-label">订单数</div>
               <div class="stat-value">{{ statistics.monthly.totals.total_orders || 0 }}</div>
             </div>
+            <div class="stat-card">
+              <div class="stat-label">件数</div>
+              <div class="stat-value">{{ statistics.monthly.totals.total_items || 0 }}</div>
+            </div>
             <div class="stat-card success">
               <div class="stat-label">销售额</div>
               <div class="stat-value">{{ formatMoney(statistics.monthly.totals.total_sales) }}</div>
@@ -108,6 +120,10 @@
             <div class="stat-card">
               <div class="stat-label">实发订单</div>
               <div class="stat-value">{{ statistics.monthly.shipped_totals.total_orders || 0 }}</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">实发件数</div>
+              <div class="stat-value">{{ statistics.monthly.shipped_totals.total_items || 0 }}</div>
             </div>
             <div class="stat-card success">
               <div class="stat-label">实发销售额</div>
@@ -146,6 +162,10 @@
             <div class="stat-label">统计区间总单量</div>
             <div class="stat-value">{{ statistics.order_count.total_orders || 0 }}</div>
           </div>
+          <div class="stat-card">
+            <div class="stat-label">统计区间总件数</div>
+            <div class="stat-value">{{ statistics.order_count.total_items || 0 }}</div>
+          </div>
         </div>
         <div class="table-grid">
           <el-card shadow="never">
@@ -153,6 +173,7 @@
             <el-table :data="statistics.order_count.daily_stats" size="small" border>
               <el-table-column prop="date" label="日期" min-width="140" />
               <el-table-column prop="order_count" label="单量" min-width="100" />
+              <el-table-column prop="item_count" label="件数" min-width="100" />
             </el-table>
           </el-card>
           <el-card shadow="never">
@@ -160,6 +181,7 @@
             <el-table :data="statistics.order_count.shop_stats" size="small" border>
               <el-table-column prop="shop_name" label="店铺" min-width="180" />
               <el-table-column prop="order_count" label="单量" min-width="100" />
+              <el-table-column prop="item_count" label="件数" min-width="100" />
             </el-table>
           </el-card>
         </div>
@@ -182,6 +204,10 @@
             <div class="stat-label">统计区间实发单量</div>
             <div class="stat-value">{{ statistics.shipped_count.total_shipped || 0 }}</div>
           </div>
+          <div class="stat-card">
+            <div class="stat-label">统计区间实发件数</div>
+            <div class="stat-value">{{ statistics.shipped_count.total_items || 0 }}</div>
+          </div>
         </div>
         <div class="table-grid">
           <el-card shadow="never">
@@ -189,6 +215,7 @@
             <el-table :data="statistics.shipped_count.daily_stats" size="small" border>
               <el-table-column prop="date" label="日期" min-width="140" />
               <el-table-column prop="shipped_count" label="实发单量" min-width="100" />
+              <el-table-column prop="item_count" label="件数" min-width="100" />
             </el-table>
           </el-card>
           <el-card shadow="never">
@@ -196,6 +223,7 @@
             <el-table :data="statistics.shipped_count.shop_stats" size="small" border>
               <el-table-column prop="shop_name" label="店铺" min-width="180" />
               <el-table-column prop="shipped_count" label="实发单量" min-width="100" />
+              <el-table-column prop="item_count" label="件数" min-width="100" />
             </el-table>
           </el-card>
         </div>
@@ -437,7 +465,7 @@ export default {
 }
 
 .stat-grid.single-row {
-  grid-template-columns: minmax(200px, 320px);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 320px));
 }
 
 .stat-card {

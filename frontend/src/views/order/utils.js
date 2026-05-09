@@ -95,9 +95,9 @@ export function getStatusTagType(status) {
 }
 
 export function getLogisticsTemplateLabel(template) {
-  if (template === 'offline_leiyi') return '线下-雷翼/邮政'
-  if (template === 'offline_epacket') return '线下-E邮宝'
-  if (template === 'online') return '线上'
+  if (template === 'leiyi' || template === 'offline_leiyi') return '雷翼'
+  if (template === 'chinapost' || template === 'offline_epacket') return '中国邮政'
+  if (template === 'fbs' || template === 'online') return 'FBS'
   return template || '-'
 }
 
@@ -121,13 +121,32 @@ export function getDictOptionsByCode(code, dictLabelMap = {}) {
 
 function buildFilterTabs(options = [], allLabel) {
   return [
-    { key: '', label: allLabel, countKey: 'all' },
-    ...options.map(item => ({ key: String(item.value), label: item.label, countKey: String(item.value) }))
+    ...options.map(item => ({ key: String(item.value), label: item.label, countKey: String(item.value) })),
+    { key: '', label: allLabel, countKey: 'all' }
   ]
 }
 
+const DISPLAY_STATUS_ORDER = [
+  'WaitSendGoods',
+  'WaitAcceptGoods',
+  'InCancel',
+  'Complete',
+  'Close',
+  'InIssue'
+]
+
 export function buildStatusTabs(options = []) {
-  return buildFilterTabs(options, ORDER_TAB_LABELS.allOrders)
+  const sorted = [...options].sort((a, b) => {
+    const ai = DISPLAY_STATUS_ORDER.indexOf(a.value)
+    const bi = DISPLAY_STATUS_ORDER.indexOf(b.value)
+    const aIdx = ai === -1 ? DISPLAY_STATUS_ORDER.length : ai
+    const bIdx = bi === -1 ? DISPLAY_STATUS_ORDER.length : bi
+    return aIdx - bIdx
+  }).filter(item => DISPLAY_STATUS_ORDER.includes(item.value))
+  return [
+    ...sorted.map(item => ({ key: String(item.value), label: item.label, countKey: String(item.value) })),
+    { key: '', label: ORDER_TAB_LABELS.allOrders, countKey: 'all' }
+  ]
 }
 
 export function buildBackendStatusTabs(options = []) {
@@ -160,13 +179,6 @@ export function buildSyncParams(syncForm, syncDateRange = []) {
     params.date_end = syncDateRange[1]
   }
   return params
-}
-
-export function calculateEubLogisticsFee({ purchaseAmount, amazonRatio, baseFee }) {
-  const purchase = Number(purchaseAmount || 0)
-  const ratio = Number(amazonRatio || 0)
-  const base = Number(baseFee || 0)
-  return Number((purchase * ratio / 100 + base).toFixed(2))
 }
 
 export function formatDate(value) {
@@ -723,7 +735,7 @@ export function canCancelSz56tWaybill(order) {
   const isSz56t =
     providerCode === 'sz56t' ||
     providerCode === 'leiyi' ||
-    templateCode === 'offline_leiyi' ||
+    templateCode === 'leiyi' ||
     Boolean(order && order.sz56t_order_id)
 
   return Boolean(isSz56t && (externalOrderId || trackingNumber))
@@ -758,14 +770,8 @@ export function applyCommentTempToOrder(order, commentTemp) {
     'shipping_image',
     'purchase_date',
     'shipping_date',
-    'lianlian_fee',
     'purchase_amount',
-    'express_fee',
     'logistics_fee',
-    'eub_amazon_ratio',
-    'eub_base_fee',
-    'calculated_logistics_fee',
-    'logistics_fee_override',
     'apply_qianze_at',
     'ship_qianze_at'
   ].forEach(field => {
@@ -776,7 +782,7 @@ export function applyCommentTempToOrder(order, commentTemp) {
 export function applyChinaPostCreateResult(order, waybillNo) {
   if (!order || !waybillNo) return
   order.tracking_number = waybillNo
-  order.logistics_template = 'offline_epacket'
+  order.logistics_template = 'chinapost'
 
   const logistics = ensureCurrentLogistics(order)
   if (logistics) {
@@ -784,7 +790,7 @@ export function applyChinaPostCreateResult(order, waybillNo) {
       logistics_mode: 'DBS',
       provider_code: 'chinapost',
       provider_name: 'China Post',
-      template_code: 'offline_epacket',
+      template_code: 'chinapost',
       tracking_number: waybillNo,
       logistic_status: 'created'
     })
@@ -799,7 +805,7 @@ export function applySz56tCreateResult(order, data = {}) {
   if (data.order_id) {
     order.sz56t_order_id = data.order_id
   }
-  order.logistics_template = 'offline_leiyi'
+  order.logistics_template = 'leiyi'
 
   const logistics = ensureCurrentLogistics(order)
   if (logistics) {
@@ -807,7 +813,7 @@ export function applySz56tCreateResult(order, data = {}) {
       logistics_mode: 'DBS',
       provider_code: 'sz56t',
       provider_name: 'SZ56T',
-      template_code: 'offline_leiyi',
+      template_code: 'leiyi',
       external_order_id: data.order_id || order.sz56t_order_id || null,
       tracking_number: data.tracking_number || order.tracking_number || '',
       logistic_status: 'created'
@@ -831,7 +837,7 @@ export function applyShipResult(order, resultData = {}, fallbackTracking = '', s
 
   const providerResult = resultData && resultData.provider_result ? resultData.provider_result : {}
   if (shipProvider === 'leiyi') {
-    order.logistics_template = 'offline_leiyi'
+    order.logistics_template = 'leiyi'
     if (providerResult.order_id) {
       order.sz56t_order_id = providerResult.order_id
     }
@@ -841,7 +847,7 @@ export function applyShipResult(order, resultData = {}, fallbackTracking = '', s
         logistics_mode: 'DBS',
         provider_code: 'sz56t',
         provider_name: 'SZ56T',
-        template_code: 'offline_leiyi',
+        template_code: 'leiyi',
         external_order_id: providerResult.order_id || order.sz56t_order_id || null,
         logistic_status: providerResult.mark_shipped && providerResult.mark_shipped.success ? 'posted' : 'created'
       })
@@ -849,14 +855,14 @@ export function applyShipResult(order, resultData = {}, fallbackTracking = '', s
   }
 
   if (shipProvider === 'chinapost') {
-    order.logistics_template = 'offline_epacket'
+    order.logistics_template = 'chinapost'
 
     if (logistics) {
       Object.assign(logistics, {
         logistics_mode: 'DBS',
         provider_code: 'chinapost',
         provider_name: 'China Post',
-        template_code: 'offline_epacket',
+        template_code: 'chinapost',
         logistic_status: 'created'
       })
     }
@@ -941,7 +947,7 @@ export function applySz56tCancelResult(order) {
     logistics_mode: 'DBS',
     provider_code: 'sz56t',
     provider_name: 'SZ56T',
-    template_code: 'offline_leiyi',
+    template_code: 'leiyi',
     external_order_id: null,
     tracking_number: '',
     logistic_status: 'cancelled'

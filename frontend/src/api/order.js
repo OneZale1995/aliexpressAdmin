@@ -40,6 +40,10 @@ export function batchUpdateOrderBackendStatus(data) {
   return request({ url: '/orders/batch-update-backend-status', method: 'post', data })
 }
 
+export function enrichSkuAttributes(data) {
+  return request({ url: '/orders/enrich-sku-attributes', method: 'post', data })
+}
+
 export function shipOrder(data) {
   return request({ url: '/orders/ship', method: 'post', data })
 }

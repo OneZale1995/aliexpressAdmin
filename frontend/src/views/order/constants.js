@@ -28,7 +28,8 @@ export const ORDER_DICT_CODE = {
   undeliverableOption: 'ae_undeliverable_option',
   dangerType: 'ae_danger_type',
   finishReason: 'ae_finish_reason',
-  syncStatus: 'order_sync_status'
+  syncStatus: 'order_sync_status',
+  logisticsTemplate: 'logistics_template'
 }
 
 export const SZ56T_CARGO_TYPE_OPTIONS = [
@@ -131,8 +132,8 @@ export const SZ56T_BATTERY_TYPE_OPTIONS = [
 const DEFAULT_LIST_QUERY = {
   page: 1,
   limit: 20,
-  display_status: '',
-  backend_status: '',
+  display_status: 'WaitSendGoods',
+  backend_status: 'wait_review',
   shop_id: '',
   shop_keyword: '',
   ae_order_id: '',
@@ -409,15 +410,9 @@ const DEFAULT_COMMENT_TEMP = {
   shipping_image: '',
   purchase_date: '',
   shipping_date: '',
-  lianlian_fee: 0,
   purchase_amount: 0,
-  express_fee: 0,
   logistics_fee: 0,
-  logistics_template: 'online',
-  eub_amazon_ratio: 0,
-  eub_base_fee: 0,
-  calculated_logistics_fee: 0,
-  logistics_fee_override: false,
+  logistics_template: '',
   apply_qianze_at: '',
   ship_qianze_at: ''
 }

@@ -48,6 +48,7 @@
                 <a v-if="getItemLink(item)" :href="getItemLink(item)" target="_blank" rel="noopener noreferrer" class="goods-title goods-title-link">{{ item.name || '-' }}</a>
                 <div v-else class="goods-title">{{ item.name || '-' }}</div>
                 <div class="goods-category">分类：{{ getCategoryFromSku(item) }}</div>
+                <div v-if="getItemSpec(item)" class="goods-spec">{{ getItemSpec(item) }}</div>
                 <div class="goods-meta">{{ item.sku_code || '-' }} | {{ item.item_price || 0 }} x {{ item.quantity || 1 }}</div>
               </div>
             </div>
@@ -58,10 +59,15 @@
           <div class="col-basic cell-block">
             <div class="meta-line"><span class="label">店铺名称</span><span class="clip-text">{{ order.shop ? order.shop.name : '-' }}</span></div>
             <div class="meta-line"><span class="label">店铺邮箱</span><span class="clip-text">{{ order.shop ? order.shop.email : '-' }}</span></div>
-            <div class="meta-line"><span class="label">订单号</span><span class="order-id">{{ order.ae_order_id }}</span></div>
-            <div class="meta-line"><span class="label">下单</span>{{ formatDate(order.ae_created_at) }}</div>
+            <div class="meta-line"><span class="label">订单号</span><span class="order-id">{{ order.ae_order_id }}</span><el-button type="text" size="mini" icon="el-icon-copy-document" class="inline-copy-btn" @click="$emit('copy-text', order.ae_order_id)" /></div>
+            <div class="meta-line"><span class="label">下单</span><span class="highlight-date">{{ formatDate(order.ae_created_at) }}</span></div>
+            <div class="meta-line"><span class="label">件数</span><span class="highlight-count">{{ getOrderItemCount(order) }}</span></div>
             <div class="meta-line"><span class="label">买家</span>{{ order.buyer_name || '-' }}</div>
             <div class="meta-line"><span class="label">状态</span><el-tag :type="getStatusTagType(order.order_display_status)" size="mini">{{ getStatusLabel(order.order_display_status) }}</el-tag></div>
+            <div v-if="getOrderIssueStatus(order)" class="meta-line">
+              <span class="label">争议</span>
+              <el-tag type="danger" size="mini" effect="dark">{{ getOrderIssueStatus(order) }}</el-tag>
+            </div>
             <div class="meta-line">
               <span class="label">送达状态</span>
               <el-tag
@@ -97,10 +103,10 @@
           </div>
 
           <div class="col-amount cell-block">
-            <div class="meta-line"><span class="label">销售额</span><span class="strong">{{ Number(order.total_amount || 0).toFixed(2) }}</span></div>
+            <div class="meta-line"><span class="label">销售额</span><span class="strong">{{ Number(order.total_amount || 0).toFixed(2) }}</span><el-button type="text" size="mini" icon="el-icon-copy-document" class="inline-copy-btn" @click="$emit('copy-text', Number(order.total_amount || 0).toFixed(2))" /></div>
             <div class="meta-line"><span class="label">手续费</span>{{ calcFee(order) }}</div>
             <div class="meta-line"><span class="label">回款</span>{{ calcTotalBack(order) }}</div>
-            <div class="meta-line"><span class="label">采购</span>{{ Number(order.purchase_amount || 0).toFixed(2) }}</div>
+            <div class="meta-line"><span class="label">采购</span>{{ Number(order.purchase_amount || 0).toFixed(2) }}<el-button type="text" size="mini" icon="el-icon-copy-document" class="inline-copy-btn" @click="$emit('copy-text', Number(order.purchase_amount || 0).toFixed(2))" /></div>
             <div class="meta-line"><span class="label">物流费</span>{{ Number(order.logistics_fee || 0).toFixed(2) }}</div>
             <div class="meta-line"><span class="label">利润</span><span :class="calcProfit(order) >= 0 ? 'text-success' : 'text-danger'">{{ Number(calcProfit(order) || 0).toFixed(2) }}</span></div>
             <div class="meta-line"><span class="label">利润率</span><span :class="calcProfit(order) >= 0 ? 'text-success' : 'text-danger'">{{ calcProfitRate(order) }}%</span></div>
@@ -304,6 +310,38 @@ export default {
     },
     getShipButtonText(order) {
       return isDbsLogisticsType(order.logistics_type) ? 'DBS发货' : 'FBS发货'
+    },
+    getItemSpec(item) {
+      const skuAttrs = item.sku_attributes || {}
+      if (Object.keys(skuAttrs).length) {
+        return Object.entries(skuAttrs).map(([k, v]) => k + ': ' + v).join(' | ')
+      }
+      const props = item.properties || item.properties_map || {}
+      const specs = []
+      const sizeKeys = ['size', 'color', 'colour', '颜色', '尺码', '尺寸', 'цвет', 'размер', 'покрой']
+      for (const [key, val] of Object.entries(props)) {
+        const k = key.toLowerCase()
+        if (k.includes('package') || k.includes('упаковк')) continue
+        if (sizeKeys.some(sk => k.includes(sk)) && val) {
+          specs.push(key + ': ' + val)
+        }
+      }
+      if (!specs.length) {
+        const sku = item.sku_code || ''
+        const match = sku.match(/-(\d{2,3})$/)
+        if (match) specs.push('尺码: ' + match[1])
+      }
+      return specs.join(' | ')
+    },
+    getOrderItemCount(order) {
+      return (order.items || []).reduce((sum, item) => sum + (item.quantity || 1), 0)
+    },
+    getOrderIssueStatus(order) {
+      const items = order.items || []
+      const issue = items.find(i => i.issue_status && i.issue_status !== 'NoDispute')
+      if (!issue) return ''
+      const map = { InProcess: '争议中', Finished: '争议完结', Cancelled: '争议取消' }
+      return map[issue.issue_status] || issue.issue_status
     }
   }
 }
@@ -525,6 +563,29 @@ export default {
   color: #e6a23c;
   letter-spacing: 0.5px;
   user-select: all;
+}
+
+.inline-copy-btn {
+  margin-left: 2px;
+  padding: 0;
+}
+
+.highlight-date {
+  color: #409eff;
+  font-weight: 600;
+}
+
+.highlight-count {
+  color: #e6a23c;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.goods-spec {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #e6a23c;
+  font-weight: 500;
 }
 
 @media (max-width: 1400px) {

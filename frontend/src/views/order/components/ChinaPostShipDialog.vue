@@ -60,13 +60,13 @@
         </el-row>
         <el-row :gutter="12">
           <el-col :span="8"><el-form-item label="电子邮箱"><el-input v-model="shipForm.chinapost_sender.email" /></el-form-item></el-col>
-          <el-col :span="8"><el-form-item label="所在国家" required><el-select v-model="shipForm.chinapost_sender.nation" filterable allow-create default-first-option clearable placeholder="输入或选择国家代码" style="width:100%;" :loading="regionLoading.sender" @change="handleChinaPostRegionFieldChange('sender', 'nation')"><el-option v-for="item in getChinaPostRegionOptions('sender', 'nations')" :key="`sender-nation-${item.value}`" :label="item.label" :value="item.value" /></el-select></el-form-item></el-col>
+          <el-col :span="8"><el-form-item label="所在国家" required><el-input v-model="shipForm.chinapost_sender.nation" placeholder="输入国家代码" /></el-form-item></el-col>
           <el-col :span="8"><el-form-item label="寄件人邮编"><el-input v-model="shipForm.chinapost_sender.post_code" placeholder="输入邮编" /></el-form-item></el-col>
         </el-row>
         <el-row :gutter="12">
-          <el-col :span="8"><el-form-item label="省/州" required><el-select v-model="shipForm.chinapost_sender.province" filterable allow-create default-first-option clearable placeholder="输入或选择省/州" style="width:100%;" :loading="regionLoading.sender" @change="handleChinaPostRegionFieldChange('sender', 'province')"><el-option v-for="item in getChinaPostRegionOptions('sender', 'provinces')" :key="`sender-province-${item.value}`" :label="item.label" :value="item.value" /></el-select></el-form-item></el-col>
-          <el-col :span="8"><el-form-item label="市" required><el-select v-model="shipForm.chinapost_sender.city" filterable allow-create default-first-option clearable placeholder="输入或选择城市" style="width:100%;" :loading="regionLoading.sender" @change="handleChinaPostRegionFieldChange('sender', 'city')"><el-option v-for="item in getChinaPostRegionOptions('sender', 'cities')" :key="`sender-city-${item.value}`" :label="item.label" :value="item.value" /></el-select></el-form-item></el-col>
-          <el-col :span="8"><el-form-item label="区/县" required><el-select v-model="shipForm.chinapost_sender.county" filterable allow-create default-first-option clearable placeholder="输入或选择区/县" style="width:100%;" :loading="regionLoading.sender" @change="handleChinaPostRegionFieldChange('sender', 'county')"><el-option v-for="item in getChinaPostRegionOptions('sender', 'counties')" :key="`sender-county-${item.value}`" :label="item.label" :value="item.value" /></el-select></el-form-item></el-col>
+          <el-col :span="8"><el-form-item label="省/州" required><el-input v-model="shipForm.chinapost_sender.province" placeholder="输入省/州" /></el-form-item></el-col>
+          <el-col :span="8"><el-form-item label="市" required><el-input v-model="shipForm.chinapost_sender.city" placeholder="输入城市" /></el-form-item></el-col>
+          <el-col :span="8"><el-form-item label="区/县" required><el-input v-model="shipForm.chinapost_sender.county" placeholder="输入区/县" /></el-form-item></el-col>
         </el-row>
         <el-row :gutter="12">
           <el-col :span="16"><el-form-item label="寄件人地址" required><el-input v-model="shipForm.chinapost_sender.address" /></el-form-item></el-col>
@@ -86,12 +86,12 @@
         <el-row :gutter="12">
           <el-col :span="8"><el-form-item label="电子邮箱"><el-input v-model="shipForm.chinapost_receiver.email" /></el-form-item></el-col>
           <el-col :span="8"><el-form-item label="所在国家" required><el-input value="RU" disabled /></el-form-item></el-col>
-          <el-col :span="8"><el-form-item label="邮政编码"><el-select v-model="shipForm.chinapost_receiver.post_code" filterable allow-create default-first-option clearable placeholder="输入或选择邮编" style="width:100%;" :loading="regionLoading.receiver"><el-option v-for="item in getChinaPostRegionOptions('receiver', 'postCodes')" :key="`receiver-post-${item.value}`" :label="item.label" :value="item.value" /></el-select></el-form-item></el-col>
+          <el-col :span="8"><el-form-item label="邮政编码"><el-input v-model="shipForm.chinapost_receiver.post_code" placeholder="输入邮编" /></el-form-item></el-col>
         </el-row>
         <el-row :gutter="12">
-          <el-col :span="8"><el-form-item label="省/州" required><el-select v-model="shipForm.chinapost_receiver.province" filterable allow-create default-first-option clearable placeholder="输入或选择省/州" style="width:100%;" :loading="regionLoading.receiver" @change="handleChinaPostRegionFieldChange('receiver', 'province')"><el-option v-for="item in getChinaPostRegionOptions('receiver', 'provinces')" :key="`receiver-province-${item.value}`" :label="item.label" :value="item.value" /></el-select></el-form-item></el-col>
-          <el-col :span="8"><el-form-item label="市" required><el-select v-model="shipForm.chinapost_receiver.city" filterable allow-create default-first-option clearable placeholder="输入或选择城市" style="width:100%;" :loading="regionLoading.receiver" @change="handleChinaPostRegionFieldChange('receiver', 'city')"><el-option v-for="item in getChinaPostRegionOptions('receiver', 'cities')" :key="`receiver-city-${item.value}`" :label="item.label" :value="item.value" /></el-select></el-form-item></el-col>
-          <el-col :span="8"><el-form-item label="区/县" required><el-select v-model="shipForm.chinapost_receiver.county" filterable allow-create default-first-option clearable placeholder="输入或选择区/县" style="width:100%;" :loading="regionLoading.receiver" @change="handleChinaPostRegionFieldChange('receiver', 'county')"><el-option v-for="item in getChinaPostRegionOptions('receiver', 'counties')" :key="`receiver-county-${item.value}`" :label="item.label" :value="item.value" /></el-select></el-form-item></el-col>
+          <el-col :span="8"><el-form-item label="省/州" required><el-input v-model="shipForm.chinapost_receiver.province" placeholder="输入省/州" /></el-form-item></el-col>
+          <el-col :span="8"><el-form-item label="市" required><el-input v-model="shipForm.chinapost_receiver.city" placeholder="输入城市" /></el-form-item></el-col>
+          <el-col :span="8"><el-form-item label="区/县" required><el-input v-model="shipForm.chinapost_receiver.county" placeholder="输入区/县" /></el-form-item></el-col>
         </el-row>
         <el-row :gutter="12">
           <el-col :span="16"><el-form-item label="收件人地址" required><el-input v-model="shipForm.chinapost_receiver.address" /></el-form-item></el-col>
@@ -118,8 +118,8 @@
         <div class="chinapost-value-summary">内件总价值：USD {{ chinaPostItemsTotalValue }}</div>
         <el-table :data="shipForm.chinapost_items" size="mini" border>
           <el-table-column label="SKU编号" min-width="120"><template slot-scope="{ row }"><el-input v-model="row.cargo_no" size="mini" /></template></el-table-column>
-          <el-table-column label="物品中文名" min-width="150"><template slot-scope="{ row }"><el-input v-model="row.cargo_name" size="mini" /></template></el-table-column>
-          <el-table-column label="物品英文名" min-width="150"><template slot-scope="{ row }"><el-input v-model="row.cargo_name_en" size="mini" /></template></el-table-column>
+          <el-table-column label="物品中文名" min-width="150"><template slot-scope="{ row }"><el-select v-model="row.cargo_name" filterable allow-create default-first-option size="mini" placeholder="选择或输入" style="width:100%;" @change="val => onCustomsCnChange(row, val)"><el-option v-for="item in customsProducts" :key="'cn-'+item.id" :label="item.name_cn" :value="item.name_cn" /></el-select></template></el-table-column>
+          <el-table-column label="物品英文名" min-width="150"><template slot-scope="{ row }"><el-select v-model="row.cargo_name_en" filterable allow-create default-first-option size="mini" placeholder="选择或输入" style="width:100%;" @change="val => onCustomsEnChange(row, val)"><el-option v-for="item in customsProducts" :key="'en-'+item.id" :label="item.name_en" :value="item.name_en" /></el-select></template></el-table-column>
           <el-table-column label="单位申报重量(g)" width="140"><template slot-scope="{ row }"><el-input-number v-model="row.cargo_weight" :min="0" :step="1" size="mini" style="width:100%;" /></template></el-table-column>
           <el-table-column label="单位申报价值" width="130"><template slot-scope="{ row }"><el-input v-model="row.cost" size="mini" placeholder="请填写" /></template></el-table-column>
           <el-table-column label="数量" width="110"><template slot-scope="{ row }"><el-input-number v-model="row.cargo_quantity" :min="1" :step="1" size="mini" style="width:100%;" /></template></el-table-column>
@@ -175,18 +175,10 @@
 import {
   deleteOrderAddressBook,
   fetchOrderAddressBookList,
-  fetchOrderAddressBookRegionOptions,
   saveOrderAddressBook
 } from '@/api/order'
+import { fetchCustomsProductList } from '@/api/system'
 import { createDefaultChinaPostItem } from '../constants'
-
-const createEmptyChinaPostRegionOptions = () => ({
-  nations: [],
-  provinces: [],
-  cities: [],
-  counties: [],
-  postCodes: []
-})
 
 export default {
   name: 'ChinaPostShipDialog',
@@ -202,11 +194,7 @@ export default {
       addressBookType: 'sender',
       addressBookLoading: false,
       addressBookStore: { sender: [], receiver: [] },
-      regionLoading: { sender: false, receiver: false },
-      chinaPostRegionOptions: {
-        sender: createEmptyChinaPostRegionOptions(),
-        receiver: createEmptyChinaPostRegionOptions()
-      },
+      customsProducts: [],
       chinaPostBatteryFlagOptions: [
         { label: '0 - 无电池', value: '0' },
         { label: '1 - 有电池', value: '1' }
@@ -244,19 +232,54 @@ export default {
     visible(v) {
       if (!v) return
       this.chinaPostStep = 0
-      this.loadAddressBookStore()
+      this.loadCustomsProducts()
+      this.loadAddressBookStore().then(() => {
+        this.autoFillSenderFromAddressBook()
+      })
       this.ensureReceiverNationRU()
-      this.loadChinaPostRegionOptions('sender')
-      this.loadChinaPostRegionOptions('receiver')
       this.$emit('load-chinapost-preview')
     }
   },
   methods: {
+    async loadCustomsProducts() {
+      try {
+        const res = await fetchCustomsProductList()
+        this.customsProducts = res.data.items || []
+      } catch (e) {
+        this.customsProducts = []
+      }
+    },
+    onCustomsCnChange(row, val) {
+      const match = this.customsProducts.find(p => p.name_cn === val)
+      if (match) this.$set(row, 'cargo_name_en', match.name_en)
+    },
+    onCustomsEnChange(row, val) {
+      const match = this.customsProducts.find(p => p.name_en === val)
+      if (match) this.$set(row, 'cargo_name', match.name_cn)
+    },
     ensureReceiverNationRU() {
       if (!this.shipForm.chinapost_receiver || typeof this.shipForm.chinapost_receiver !== 'object') {
         this.$set(this.shipForm, 'chinapost_receiver', {})
       }
       this.$set(this.shipForm.chinapost_receiver, 'nation', 'RU')
+    },
+    autoFillSenderFromAddressBook() {
+      const senderEntries = this.addressBookStore.sender || []
+      if (senderEntries.length === 0) return
+      const sender = this.shipForm.chinapost_sender || {}
+      if (sender.name && sender.name.trim()) return
+      const first = senderEntries[0]
+      this.$set(this.shipForm, 'chinapost_sender', {
+        ...sender,
+        ...this.normalizeAddressBookEntry('sender', first)
+      })
+    },
+    randomizeChinaPostItemValues() {
+      const items = this.shipForm.chinapost_items
+      if (!Array.isArray(items)) return
+      items.forEach(item => {
+        this.$set(item, 'cost', (Math.random() * 9 + 1).toFixed(2))
+      })
     },
     async loadAddressBookStore(type) {
       const types = type ? [type] : ['sender', 'receiver']
@@ -295,72 +318,6 @@ export default {
     getAddressBookSource(type) {
       return type === 'sender' ? this.shipForm.chinapost_sender : this.shipForm.chinapost_receiver
     },
-    getChinaPostRegionOptions(type, key) {
-      const options = this.chinaPostRegionOptions[type] || createEmptyChinaPostRegionOptions()
-      return Array.isArray(options[key]) ? options[key] : []
-    },
-    ensureChinaPostRegionOption(type, key, value) {
-      const v = String(value || '').trim()
-      if (!v) return
-      const options = this.getChinaPostRegionOptions(type, key)
-      if (options.some(item => item.value === v)) return
-      this.$set(this.chinaPostRegionOptions[type], key, options.concat([{ label: v, value: v }]))
-    },
-    async loadChinaPostRegionOptions(type) {
-      const source = this.getAddressBookSource(type) || {}
-      this.$set(this.regionLoading, type, true)
-      try {
-        const response = await fetchOrderAddressBookRegionOptions({
-          type, nation: source.nation || '', province: source.province || '',
-          city: source.city || '', county: source.county || ''
-        })
-        const data = response.data || {}
-        this.$set(this.chinaPostRegionOptions, type, {
-          nations: Array.isArray(data.nations) ? data.nations : [],
-          provinces: Array.isArray(data.provinces) ? data.provinces : [],
-          cities: Array.isArray(data.cities) ? data.cities : [],
-          counties: Array.isArray(data.counties) ? data.counties : [],
-          postCodes: Array.isArray(data.post_codes) ? data.post_codes : []
-        })
-        this.ensureChinaPostRegionOption(type, 'nations', source.nation)
-        this.ensureChinaPostRegionOption(type, 'provinces', source.province)
-        this.ensureChinaPostRegionOption(type, 'cities', source.city)
-        this.ensureChinaPostRegionOption(type, 'counties', source.county)
-        this.ensureChinaPostRegionOption(type, 'postCodes', source.post_code)
-        this.syncChinaPostAutoPostCode(type)
-      } finally {
-        this.$set(this.regionLoading, type, false)
-      }
-    },
-    syncChinaPostAutoPostCode(type) {
-      const source = this.getAddressBookSource(type)
-      if (!source || typeof source !== 'object') return
-      const options = this.getChinaPostRegionOptions(type, 'postCodes')
-      if (!source.post_code && options.length === 1) {
-        this.$set(source, 'post_code', options[0].value)
-      }
-    },
-    async handleChinaPostRegionFieldChange(type, field) {
-      const source = this.getAddressBookSource(type)
-      if (!source || typeof source !== 'object') return
-      if (field === 'nation') {
-        source.nation = String(source.nation || '').trim().toUpperCase()
-        source.province = ''; source.city = ''; source.county = ''; source.post_code = ''
-      }
-      if (field === 'province') {
-        source.province = String(source.province || '').trim()
-        source.city = ''; source.county = ''; source.post_code = ''
-      }
-      if (field === 'city') {
-        source.city = String(source.city || '').trim()
-        source.county = ''; source.post_code = ''
-      }
-      if (field === 'county') {
-        source.county = String(source.county || '').trim()
-        source.post_code = ''
-      }
-      await this.loadChinaPostRegionOptions(type)
-    },
     async openAddressBook(type) {
       this.addressBookType = type
       await this.loadAddressBookStore(type)
@@ -378,7 +335,6 @@ export default {
         ...this.normalizeAddressBookEntry(type, response.data.item || entry)
       })
       await this.loadAddressBookStore(type)
-      await this.loadChinaPostRegionOptions(type)
       this.$message.success(type === 'sender' ? '寄件人已保存到地址簿' : '收件人已保存到地址簿')
     },
     applyAddressBookEntry(row) {
@@ -389,14 +345,12 @@ export default {
         ...this.normalizeAddressBookEntry(type, row)
       })
       this.addressBookDialogVisible = false
-      this.loadChinaPostRegionOptions(type)
       this.$message.success(type === 'sender' ? '已填充寄件人信息' : '已填充收件人信息')
     },
     async removeAddressBookEntry(row) {
       const type = this.addressBookType
       await deleteOrderAddressBook({ id: row.id })
       await this.loadAddressBookStore(type)
-      await this.loadChinaPostRegionOptions(type)
       this.$message.success('地址簿记录已删除')
     },
     formatAddressBookRegion(row) {
@@ -406,7 +360,9 @@ export default {
       if (!Array.isArray(this.shipForm.chinapost_items)) {
         this.$set(this.shipForm, 'chinapost_items', [])
       }
-      this.shipForm.chinapost_items.push(createDefaultChinaPostItem())
+      const item = createDefaultChinaPostItem()
+      item.cost = (Math.random() * 9 + 1).toFixed(2)
+      this.shipForm.chinapost_items.push(item)
     },
     removeChinaPostItem(index) {
       if (!Array.isArray(this.shipForm.chinapost_items)) return
@@ -437,8 +393,6 @@ export default {
           ...this.shipForm.chinapost_receiver,
           name: '', phone: '', mobile: '', email: '', province: '', city: '', county: '', address: ''
         }
-        this.loadChinaPostRegionOptions('sender')
-        this.loadChinaPostRegionOptions('receiver')
         return
       }
       this.shipForm.chinapost_items = [createDefaultChinaPostItem()]

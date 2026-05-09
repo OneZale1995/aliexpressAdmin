@@ -18,35 +18,13 @@
       <el-row :gutter="12">
         <el-col :span="12">
           <el-form-item label="采购额">
-            <el-input v-model.number="commentTemp.purchase_amount" type="number" min="0" @input="$emit('recalc-eub-logistics-fee')" />
+            <el-input v-model.number="commentTemp.purchase_amount" type="number" min="0" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
           <el-form-item label="物流费">
-            <el-input v-model.number="commentTemp.logistics_fee" type="number" min="0" @input="$emit('mark-logistics-fee-manual-edit')" />
+            <el-input v-model.number="commentTemp.logistics_fee" type="number" min="0" />
           </el-form-item>
-        </el-col>
-      </el-row>
-      <el-row v-if="commentTemp.logistics_template === 'offline_epacket'" :gutter="12">
-        <el-col :span="12">
-          <el-form-item label="亚马逊比例%">
-            <el-input v-model.number="commentTemp.eub_amazon_ratio" type="number" min="0" @input="$emit('recalc-eub-logistics-fee')" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="固定附加费">
-            <el-input v-model.number="commentTemp.eub_base_fee" type="number" min="0" @input="$emit('recalc-eub-logistics-fee')" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-      <el-row v-if="commentTemp.logistics_template === 'offline_epacket'" :gutter="12">
-        <el-col :span="12">
-          <el-form-item label="系统计算值">
-            <el-input :value="commentTemp.calculated_logistics_fee" disabled />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12" style="display:flex; align-items:center;">
-          <el-button size="mini" @click="$emit('reset-logistics-fee-to-calculated')">按计算值回填物流费</el-button>
         </el-col>
       </el-row>
       <el-form-item label="采购图片">

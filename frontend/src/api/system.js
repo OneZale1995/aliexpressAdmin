@@ -190,6 +190,23 @@ export function uploadAvatar(data) {
   return request({ url: '/profile/avatar', method: 'post', data, headers: { 'Content-Type': 'multipart/form-data' } })
 }
 
+// ========== 报关商品管理 ==========
+export function fetchCustomsProductList() {
+  return request({ url: '/customs-products/list', method: 'post' })
+}
+
+export function createCustomsProduct(data) {
+  return request({ url: '/customs-products/create', method: 'post', data })
+}
+
+export function updateCustomsProduct(data) {
+  return request({ url: '/customs-products/update', method: 'post', data })
+}
+
+export function deleteCustomsProduct(data) {
+  return request({ url: '/customs-products/delete', method: 'post', data })
+}
+
 // ========== 通用导出 ==========
 export function exportData(data) {
   return request({ url: '/export', method: 'post', data, responseType: 'blob' })

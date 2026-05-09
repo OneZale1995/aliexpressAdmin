@@ -60,8 +60,8 @@
 
         <el-divider content-position="left">申报信息</el-divider>
         <el-table :data="shipForm.sz56t_items" size="mini" border class="sz56t-simple-items-table">
-          <el-table-column label="中文品名" min-width="130"><template slot-scope="{ row }"><el-input v-model="row.sku" size="mini" placeholder="选填" /></template></el-table-column>
-          <el-table-column min-width="170"><template slot="header"><span class="sz56t-required-header">* 英文品名</span></template><template slot-scope="{ row }"><el-input v-model="row.invoice_title" size="mini" placeholder="必填" /></template></el-table-column>
+          <el-table-column label="中文品名" min-width="150"><template slot-scope="{ row }"><el-select v-model="row.sku" filterable allow-create default-first-option size="mini" placeholder="选择或输入" style="width:100%;" @change="handleCustomsNameCnChange(row)"><el-option v-for="item in customsProducts" :key="'cn-'+item.id" :label="item.name_cn" :value="item.name_cn" /></el-select></template></el-table-column>
+          <el-table-column min-width="180"><template slot="header"><span class="sz56t-required-header">* 英文品名</span></template><template slot-scope="{ row }"><el-select v-model="row.invoice_title" filterable allow-create default-first-option size="mini" placeholder="选择或输入" style="width:100%;" @change="handleCustomsNameEnChange(row)"><el-option v-for="item in customsProducts" :key="'en-'+item.id" :label="item.name_en" :value="item.name_en" /></el-select></template></el-table-column>
           <el-table-column label="配货" min-width="140"><template slot-scope="{ row }"><el-input v-model="row.sku_code" size="mini" placeholder="配货选填" /></template></el-table-column>
           <el-table-column width="160"><template slot="header"><span class="sz56t-required-header">* 单个商品重量(克)</span></template><template slot-scope="{ row }"><el-input-number v-model="row.invoice_weight" :min="1" :step="1" size="mini" style="width:100%;" /></template></el-table-column>
           <el-table-column width="110"><template slot="header"><span class="sz56t-required-header">* 产品数量</span></template><template slot-scope="{ row }"><el-input-number v-model="row.invoice_pcs" :min="1" :step="1" size="mini" style="width:100%;" /></template></el-table-column>
@@ -258,8 +258,8 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="中文品名" min-width="160"><template slot-scope="{ row }"><el-input v-model="row.sku" size="mini" /></template></el-table-column>
-          <el-table-column label="英文品名" min-width="180"><template slot-scope="{ row }"><el-input v-model="row.invoice_title" size="mini" /></template></el-table-column>
+          <el-table-column label="中文品名" min-width="160"><template slot-scope="{ row }"><el-select v-model="row.sku" filterable allow-create default-first-option size="mini" placeholder="选择或输入" style="width:100%;" @change="handleCustomsNameCnChange(row)"><el-option v-for="item in customsProducts" :key="'cn2-'+item.id" :label="item.name_cn" :value="item.name_cn" /></el-select></template></el-table-column>
+          <el-table-column label="英文品名" min-width="180"><template slot-scope="{ row }"><el-select v-model="row.invoice_title" filterable allow-create default-first-option size="mini" placeholder="选择或输入" style="width:100%;" @change="handleCustomsNameEnChange(row)"><el-option v-for="item in customsProducts" :key="'en2-'+item.id" :label="item.name_en" :value="item.name_en" /></el-select></template></el-table-column>
           <el-table-column label="配货信息" min-width="140"><template slot-scope="{ row }"><el-input v-model="row.sku_code" size="mini" /></template></el-table-column>
           <el-table-column label="海关编码" min-width="130"><template slot-scope="{ row }"><el-input v-model="row.hs_code" size="mini" /></template></el-table-column>
           <el-table-column label="数量" width="90"><template slot-scope="{ row }"><el-input-number v-model="row.invoice_pcs" :min="1" :step="1" size="mini" /></template></el-table-column>
@@ -305,6 +305,7 @@ import {
   createDefaultSz56tVolume
 } from '../constants'
 import { SZ56T_COUNTRY_OPTIONS } from '../sz56tCountryOptions'
+import { fetchCustomsProductList } from '@/api/system'
 
 export default {
   name: 'LeiyiShipDialog',
@@ -327,7 +328,8 @@ export default {
       sz56tDutyTypeOptions: SZ56T_DUTY_TYPE_OPTIONS,
       sz56tExportReasonOptions: SZ56T_EXPORT_REASON_OPTIONS,
       sz56tInvoiceUnitOptions: SZ56T_INVOICE_UNIT_OPTIONS,
-      sz56tTaxTypeOptions: SZ56T_TAX_TYPE_OPTIONS
+      sz56tTaxTypeOptions: SZ56T_TAX_TYPE_OPTIONS,
+      customsProducts: []
     }
   },
   computed: {
@@ -344,10 +346,27 @@ export default {
     visible(v) {
       if (!v) return
       this.leiyiFormMode = 'simple'
+      this.loadCustomsProducts()
+      this.randomizeSz56tItemAmounts()
       this.$emit('load-sz56t-products')
     }
   },
   methods: {
+    async loadCustomsProducts() {
+      try {
+        const res = await fetchCustomsProductList()
+        this.customsProducts = res.data.items || []
+      } catch (e) {
+        this.customsProducts = []
+      }
+    },
+    randomizeSz56tItemAmounts() {
+      const items = this.shipForm.sz56t_items
+      if (!Array.isArray(items)) return
+      items.forEach(item => {
+        this.$set(item, 'invoice_amount', (Math.random() * 9 + 1).toFixed(2))
+      })
+    },
     addSz56tItem() {
       if (!Array.isArray(this.shipForm.sz56t_items)) {
         this.$set(this.shipForm, 'sz56t_items', [])
@@ -374,6 +393,18 @@ export default {
     removeSz56tVolume(index) {
       if (!this.shipForm.sz56t_form || !Array.isArray(this.shipForm.sz56t_form.orderVolumeParam)) return
       this.shipForm.sz56t_form.orderVolumeParam.splice(index, 1)
+    },
+    handleCustomsNameCnChange(row) {
+      const product = this.customsProducts.find(p => p.name_cn === row.sku)
+      if (product) {
+        this.$set(row, 'invoice_title', product.name_en)
+      }
+    },
+    handleCustomsNameEnChange(row) {
+      const product = this.customsProducts.find(p => p.name_en === row.invoice_title)
+      if (product) {
+        this.$set(row, 'sku', product.name_cn)
+      }
     }
   }
 }

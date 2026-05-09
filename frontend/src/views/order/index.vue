@@ -56,9 +56,6 @@
       :backend-status-options="backendStatusOptions"
       :upload-url="uploadUrl"
       :upload-headers="uploadHeaders"
-      @recalc-eub-logistics-fee="recalcEubLogisticsFee"
-      @mark-logistics-fee-manual-edit="markLogisticsFeeManualEdit"
-      @reset-logistics-fee-to-calculated="resetLogisticsFeeToCalculated"
       @image-upload-success="handleImageUploadSuccess"
       @save="submitComment"
     />
@@ -199,7 +196,6 @@ import {
   buildShipItemsFromOrder,
   buildStatusTabs,
   buildSyncParams,
-  calculateEubLogisticsFee,
   canCancelSz56tWaybill,
   canMarkDbsDelivered,
   canMarkDbsInTransit,
@@ -484,45 +480,15 @@ export default {
         shipping_image: order.shipping_image || '',
         purchase_date: order.purchase_date || '',
         shipping_date: order.shipping_date || '',
-        lianlian_fee: order.lianlian_fee || 0,
         purchase_amount: order.purchase_amount || 0,
-        express_fee: order.express_fee || 0,
         logistics_fee: order.logistics_fee || 0,
-        logistics_template: order.logistics_template || 'online',
-        eub_amazon_ratio: Number(order.eub_amazon_ratio || 0),
-        eub_base_fee: Number(order.eub_base_fee || 0),
-        calculated_logistics_fee: Number(order.calculated_logistics_fee || 0),
-        logistics_fee_override: Boolean(order.logistics_fee_override),
+        logistics_template: order.logistics_template || '',
         apply_qianze_at: order.apply_qianze_at || '',
         ship_qianze_at: order.ship_qianze_at || ''
       })
-      if (this.commentTemp.logistics_template === 'offline_epacket') {
-        this.recalcEubLogisticsFee()
-      }
       this.commentDialogVisible = true
     },
-    recalcEubLogisticsFee() {
-      const calculated = calculateEubLogisticsFee({
-        purchaseAmount: this.commentTemp.purchase_amount,
-        amazonRatio: this.commentTemp.eub_amazon_ratio,
-        baseFee: this.commentTemp.eub_base_fee
-      })
-      this.commentTemp.calculated_logistics_fee = calculated
-      if (!this.commentTemp.logistics_fee_override) {
-        this.commentTemp.logistics_fee = calculated
-      }
-    },
-    markLogisticsFeeManualEdit() {
-      this.commentTemp.logistics_fee_override = true
-    },
-    resetLogisticsFeeToCalculated() {
-      this.commentTemp.logistics_fee_override = false
-      this.commentTemp.logistics_fee = Number(this.commentTemp.calculated_logistics_fee || 0)
-    },
     submitComment() {
-      if (this.commentTemp.logistics_template === 'offline_epacket') {
-        this.recalcEubLogisticsFee()
-      }
       updateOrderBackendFields(this.commentTemp).then(() => {
         this.commentDialogVisible = false
         const order = this.list.find(item => item.id === this.commentTemp.id)
@@ -941,7 +907,7 @@ export default {
     },
     handleShip(order) {
       const isDbs = isDbsLogisticsType(order.logistics_type)
-      const defaultDbsProvider = order.sz56t_order_id || order.logistics_template === 'offline_leiyi' ? 'leiyi' : 'chinapost'
+      const defaultDbsProvider = order.sz56t_order_id || order.logistics_template === 'leiyi' ? 'leiyi' : 'chinapost'
       const defaultSz56tWeight = getSz56tWeightFromOrder(order, 100)
       this.shipForm = createDefaultShipForm({
         id: order.id,
@@ -1044,7 +1010,12 @@ export default {
 
         const backendItems = Array.isArray(logisticsInterface.items) ? logisticsInterface.items : []
         if (backendItems.length && (!Array.isArray(this.shipForm.chinapost_items) || this.shipForm.chinapost_items.length <= 1)) {
-          this.$set(this.shipForm, 'chinapost_items', backendItems.map(item => createDefaultChinaPostItem(item)))
+          this.$set(this.shipForm, 'chinapost_items', backendItems.map(item => {
+            const newItem = createDefaultChinaPostItem(item)
+            newItem.cost = (Math.random() * 9 + 1).toFixed(2)
+            newItem.cargo_value = newItem.cost
+            return newItem
+          }))
         }
       }).catch(err => {
         this.showError(err, '获取中国邮政请求参数失败')
@@ -1808,7 +1779,7 @@ export default {
         id: this.shipForm.id,
         ae_order_id: this.shipForm.trade_order_id,
         logistics_type: this.shipForm.logistics_type,
-        logistics_template: 'offline_leiyi',
+        logistics_template: 'leiyi',
         tracking_number: this.shipForm.track_number,
         sz56t_order_id: currentOrder && currentOrder.sz56t_order_id ? currentOrder.sz56t_order_id : ''
       })

@@ -13,7 +13,7 @@ class OrderItem extends Model
     protected $fillable = [
         'order_id', 'ae_order_line_id', 'ae_item_id', 'ae_sku_id',
         'sku_code', 'name', 'img_url', 'item_price', 'currency',
-        'quantity', 'total_amount', 'properties',
+        'quantity', 'total_amount', 'properties', 'sku_attributes',
         'line_fee', 'item_affiliate_fee', 'item_estimate_revenue',
         'issue_status', 'logistic_name', 'logistic_storage_type',
     ];
@@ -25,6 +25,7 @@ class OrderItem extends Model
         'item_affiliate_fee' => 'decimal:2',
         'item_estimate_revenue' => 'decimal:2',
         'properties' => 'array',
+        'sku_attributes' => 'array',
     ];
 
     public function order()

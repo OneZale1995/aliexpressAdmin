@@ -904,7 +904,7 @@ class OrderLogisticsController extends Controller
                 'logistics_mode' => $order->logistics_type ?: 'DBS',
                 'provider_code' => 'sz56t',
                 'provider_name' => 'SZ56T',
-                'template_code' => 'offline_leiyi',
+                'template_code' => 'leiyi',
                 'external_order_id' => $sz56tOrderId,
                 'payload' => [
                     'sz56t' => [
@@ -963,7 +963,7 @@ class OrderLogisticsController extends Controller
                 'logistics_mode' => $order->logistics_type ?: 'DBS',
                 'provider_code' => 'sz56t',
                 'provider_name' => 'SZ56T',
-                'template_code' => 'offline_leiyi',
+                'template_code' => 'leiyi',
                 'logistic_status' => 'posted',
                 'payload' => [
                     'sz56t' => [
@@ -1054,7 +1054,7 @@ class OrderLogisticsController extends Controller
             'logistics_mode' => $order->logistics_type ?: 'DBS',
             'provider_code' => 'sz56t',
             'provider_name' => 'SZ56T',
-            'template_code' => 'offline_leiyi',
+            'template_code' => 'leiyi',
             'external_order_id' => null,
             'tracking_number' => null,
             'logistic_status' => 'cancelled',
@@ -1944,7 +1944,7 @@ class OrderLogisticsController extends Controller
             'logistics_mode' => $order->logistics_type ?: 'DBS',
             'provider_code' => 'chinapost',
             'provider_name' => 'China Post',
-            'template_code' => 'offline_epacket',
+            'template_code' => 'chinapost',
             'tracking_number' => $trackingNumber,
             'logistic_status' => 'created',
             'payload' => [
@@ -1984,7 +1984,7 @@ class OrderLogisticsController extends Controller
                 'logistics_mode' => $order->logistics_type ?: 'DBS',
                 'provider_code' => 'chinapost',
                 'provider_name' => 'China Post',
-                'template_code' => 'offline_epacket',
+                'template_code' => 'chinapost',
                 'tracking_number' => $trackingNumber,
                 'logistic_status' => 'created',
                 'payload' => [
@@ -2073,7 +2073,7 @@ class OrderLogisticsController extends Controller
             'logistics_mode' => $order->logistics_type ?: 'DBS',
             'provider_code' => 'sz56t',
             'provider_name' => 'SZ56T',
-            'template_code' => 'offline_leiyi',
+            'template_code' => 'leiyi',
             'external_order_id' => $result['order_id'] ?? null,
             'tracking_number' => $trackingNumber ?: null,
             'logistic_status' => 'created',

@@ -73,6 +73,7 @@ class OrderStatusDictSeeder extends Seeder
                     ['NoDispute', '无争议'],
                     ['InProcess', '争议处理中'],
                     ['Finished', '争议已解决'],
+                    ['Cancelled', '争议取消'],
                 ],
             ],
             'ae_logistics_type' => [
@@ -120,6 +121,8 @@ class OrderStatusDictSeeder extends Seeder
             'ae_shipment_status' => [
                 'name' => '速卖通-发货单状态',
                 'items' => [
+                    ['created', '已创建'],
+                    ['posted', '已提交'],
                     ['NEW', '新建（发货创建中）'],
                     ['AWAITING_ADDING_TO_HANDOVER', '待添加到交接单'],
                     ['AWAITING_REPORT_AS_SHIP', '等待发货确认'],
@@ -292,6 +295,15 @@ class OrderStatusDictSeeder extends Seeder
                     ['pending_purchase', '待采购'],
                     ['purchased', '已采购'],
                     ['shipped', '已发货'],
+                    ['abandoned', '弃置'],
+                ],
+            ],
+            'logistics_template' => [
+                'name' => '物流模板',
+                'items' => [
+                    ['fbs', 'FBS'],
+                    ['leiyi', '雷翼'],
+                    ['chinapost', '中国邮政'],
                 ],
             ],
         ];

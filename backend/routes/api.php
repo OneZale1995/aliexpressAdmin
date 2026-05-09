@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CustomsProductController;
 use App\Http\Controllers\Api\DictController;
 use App\Http\Controllers\Api\ExportController;
 use App\Http\Controllers\Api\FileController;
@@ -104,6 +105,12 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     Route::post('/teams/update', [TeamController::class, 'update']);
     Route::post('/teams/delete', [TeamController::class, 'destroy']);
 
+    // 报关商品管理
+    Route::post('/customs-products/list', [CustomsProductController::class, 'list']);
+    Route::post('/customs-products/create', [CustomsProductController::class, 'create']);
+    Route::post('/customs-products/update', [CustomsProductController::class, 'update']);
+    Route::post('/customs-products/delete', [CustomsProductController::class, 'delete']);
+
     // 团队用户管理（团队管理员添加/管理采购用户）
     Route::post('/team-users/list', [TeamUserController::class, 'index']);
     Route::post('/team-users/create', [TeamUserController::class, 'store']);
@@ -128,6 +135,7 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     Route::post('/orders/update-comment', [OrderController::class, 'updateComment']);
     Route::post('/orders/update-backend-fields', [OrderController::class, 'updateBackendFields']);
     Route::post('/orders/batch-update-backend-status', [OrderController::class, 'batchUpdateBackendStatus']);
+    Route::post('/orders/enrich-sku-attributes', [OrderController::class, 'enrichSkuAttributes']);
     Route::post('/orders/export', [OrderController::class, 'export']);
     Route::post('/orders/ship', [OrderLogisticsController::class, 'ship']);
     Route::post('/orders/ship/fbs', [OrderLogisticsController::class, 'shipFbs']);

@@ -171,5 +171,6 @@ class DatabaseSeeder extends Seeder
 
         $this->call(OrderStatusDictSeeder::class);
         $this->call(ShopModuleSeeder::class);
+        $this->call(CustomsProductModuleSeeder::class);
     }
 }

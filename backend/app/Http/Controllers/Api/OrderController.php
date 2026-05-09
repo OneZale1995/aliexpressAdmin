@@ -120,6 +120,12 @@ class OrderController extends Controller
         }
         if ($request->filled('backend_status')) {
             $query->where('backend_status', $request->backend_status);
+        } else {
+            $query->where(function ($q) {
+                $q->where('backend_status', '!=', 'abandoned')
+                  ->orWhereNull('backend_status')
+                  ->orWhere('backend_status', '');
+            });
         }
 
         // 下单日期范围
@@ -164,6 +170,12 @@ class OrderController extends Controller
         $this->applyShopFilter($baseQuery, $request);
         if ($request->filled('backend_status')) {
             $baseQuery->where('backend_status', $request->backend_status);
+        } else {
+            $baseQuery->where(function ($q) {
+                $q->where('backend_status', '!=', 'abandoned')
+                  ->orWhereNull('backend_status')
+                  ->orWhere('backend_status', '');
+            });
         }
 
         $total = (clone $baseQuery)->count();
@@ -222,6 +234,9 @@ class OrderController extends Controller
                 'start_date' => $orderCountStartDate,
                 'end_date' => $orderCountEndDate,
                 'total_orders' => (clone $orderCountQuery)->count(),
+                'total_items' => (int) DB::table('order_items')
+                    ->whereIn('order_id', (clone $orderCountQuery)->select('orders.id'))
+                    ->sum('quantity'),
                 'daily_stats' => $this->getCountByDate(clone $orderCountQuery, 'order_count'),
                 'shop_stats' => $this->getCountByShop(clone $orderCountQuery, 'order_count'),
             ],
@@ -229,6 +244,9 @@ class OrderController extends Controller
                 'start_date' => $shippedStartDate,
                 'end_date' => $shippedEndDate,
                 'total_shipped' => (clone $shippedQuery)->count(),
+                'total_items' => (int) DB::table('order_items')
+                    ->whereIn('order_id', (clone $shippedQuery)->select('orders.id'))
+                    ->sum('quantity'),
                 'daily_stats' => $this->getCountByDate(clone $shippedQuery, 'shipped_count'),
                 'shop_stats' => $this->getCountByShop(clone $shippedQuery, 'shipped_count'),
             ],
@@ -259,7 +277,11 @@ class OrderController extends Controller
             $this->applyDisplayStatusFilter($baseQuery, $request->display_status);
         }
 
-        $total = (clone $baseQuery)->count();
+        $total = (clone $baseQuery)->where(function ($q) {
+            $q->where('backend_status', '!=', 'abandoned')
+              ->orWhereNull('backend_status')
+              ->orWhere('backend_status', '');
+        })->count();
         $counts = ['all' => $total];
 
         foreach ($this->getBackendStatusKeys() as $status) {
@@ -272,7 +294,16 @@ class OrderController extends Controller
     protected function applyDisplayStatusFilter($query, string $status)
     {
         if (in_array($status, self::STATUS_COUNT_KEYS, true)) {
-            $query->where('order_display_status', $status);
+            if ($status === 'InIssue') {
+                $query->where(function ($q) {
+                    $q->where('order_display_status', 'InIssue')
+                      ->orWhereHas('items', function ($sub) {
+                          $sub->where('issue_status', 'InProcess');
+                      });
+                });
+            } else {
+                $query->where('order_display_status', $status);
+            }
         }
 
         return $query;
@@ -335,6 +366,8 @@ class OrderController extends Controller
 
     protected function getAggregateStats($query): array
     {
+        $itemQuery = clone $query;
+
         $stats = $query->selectRaw('
             COUNT(*) as total_orders,
             COALESCE(SUM(total_amount), 0) as total_sales,
@@ -345,8 +378,13 @@ class OrderController extends Controller
             COALESCE(SUM(total_amount - platform_fee - affiliate_fee - lianlian_fee - purchase_amount - logistics_fee), 0) as total_profit
         ')->first();
 
+        $totalItems = (int) DB::table('order_items')
+            ->whereIn('order_id', $itemQuery->select('orders.id'))
+            ->sum('quantity');
+
         return [
             'total_orders' => (int) ($stats->total_orders ?? 0),
+            'total_items' => $totalItems,
             'total_sales' => round((float) ($stats->total_sales ?? 0), 2),
             'total_purchase_cost' => round((float) ($stats->total_purchase_cost ?? 0), 2),
             'total_logistics_fee' => round((float) ($stats->total_logistics_fee ?? 0), 2),
@@ -359,8 +397,9 @@ class OrderController extends Controller
     protected function getCountByDate($query, string $alias)
     {
         return $query
-            ->selectRaw('DATE(ae_created_at) as date, COUNT(*) as ' . $alias)
-            ->groupBy(DB::raw('DATE(ae_created_at)'))
+            ->leftJoin('order_items', 'orders.id', '=', 'order_items.order_id')
+            ->selectRaw('DATE(orders.ae_created_at) as date, COUNT(DISTINCT orders.id) as ' . $alias . ', COALESCE(SUM(order_items.quantity), 0) as item_count')
+            ->groupBy(DB::raw('DATE(orders.ae_created_at)'))
             ->orderBy('date', 'desc')
             ->get();
     }
@@ -369,7 +408,8 @@ class OrderController extends Controller
     {
         return $query
             ->join('shops', 'orders.shop_id', '=', 'shops.id')
-            ->selectRaw('shops.id as shop_id, shops.name as shop_name, COUNT(*) as ' . $alias)
+            ->leftJoin('order_items', 'orders.id', '=', 'order_items.order_id')
+            ->selectRaw('shops.id as shop_id, shops.name as shop_name, COUNT(DISTINCT orders.id) as ' . $alias . ', COALESCE(SUM(order_items.quantity), 0) as item_count')
             ->groupBy('shops.id', 'shops.name')
             ->orderBy($alias, 'desc')
             ->get();
@@ -511,14 +551,8 @@ class OrderController extends Controller
             'shipping_image' => 'nullable|string|max:500',
             'purchase_date' => 'nullable|date',
             'shipping_date' => 'nullable|date',
-            'lianlian_fee' => 'nullable|numeric|min:0',
             'purchase_amount' => 'nullable|numeric|min:0',
-            'express_fee' => 'nullable|numeric|min:0',
             'logistics_fee' => 'nullable|numeric|min:0',
-            'eub_amazon_ratio' => 'nullable|numeric|min:0|max:999.99',
-            'eub_base_fee' => 'nullable|numeric|min:0',
-            'calculated_logistics_fee' => 'nullable|numeric|min:0',
-            'logistics_fee_override' => 'nullable|boolean',
             'apply_qianze_at' => 'nullable|date',
             'ship_qianze_at' => 'nullable|date',
         ]);
@@ -533,14 +567,8 @@ class OrderController extends Controller
             'shipping_image' => $request->input('shipping_image', $order->shipping_image),
             'purchase_date' => $request->input('purchase_date', $order->purchase_date),
             'shipping_date' => $request->input('shipping_date', $order->shipping_date),
-            'lianlian_fee' => $request->input('lianlian_fee', $order->lianlian_fee),
             'purchase_amount' => $request->input('purchase_amount', $order->purchase_amount),
-            'express_fee' => $request->input('express_fee', $order->express_fee),
             'logistics_fee' => $request->input('logistics_fee', $order->logistics_fee),
-            'eub_amazon_ratio' => $request->input('eub_amazon_ratio', $order->eub_amazon_ratio ?? 0),
-            'eub_base_fee' => $request->input('eub_base_fee', $order->eub_base_fee ?? 0),
-            'calculated_logistics_fee' => $request->input('calculated_logistics_fee', $order->calculated_logistics_fee ?? 0),
-            'logistics_fee_override' => (bool) $request->input('logistics_fee_override', $order->logistics_fee_override ?? false),
             'apply_qianze_at' => $request->input('apply_qianze_at', $order->apply_qianze_at),
             'ship_qianze_at' => $request->input('ship_qianze_at', $order->ship_qianze_at),
         ];
@@ -573,6 +601,21 @@ class OrderController extends Controller
         return $this->success([
             'updated' => $updated,
         ], '批量更新后台状态成功');
+    }
+
+    public function enrichSkuAttributes(Request $request)
+    {
+        $request->validate(['order_id' => 'required|integer|exists:orders,id']);
+
+        $order = Order::with(['items', 'shop'])->findOrFail($request->order_id);
+        if (!$order->shop) {
+            return $this->error('订单无关联店铺');
+        }
+
+        $service = new \App\Services\AliExpressService();
+        $enriched = $service->enrichOrderItemSkuAttributes($order->shop, $order);
+
+        return $this->success(['enriched' => $enriched], "已补充 {$enriched} 个商品的SKU属性");
     }
 
     /**

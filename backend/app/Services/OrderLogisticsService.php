@@ -53,9 +53,9 @@ class OrderLogisticsService
     public function resolveProviderCodeByTemplate(?string $templateCode): ?string
     {
         return match ($templateCode) {
-            'offline_epacket' => 'chinapost',
-            'offline_leiyi' => 'sz56t',
-            'online' => 'aliexpress',
+            'chinapost', 'offline_epacket' => 'chinapost',
+            'leiyi', 'offline_leiyi' => 'sz56t',
+            'fbs', 'online' => 'aliexpress',
             default => null,
         };
     }
@@ -146,9 +146,9 @@ class OrderLogisticsService
         }
 
         return match ($logistics->provider_code) {
-            'chinapost' => 'offline_epacket',
-            'sz56t' => 'offline_leiyi',
-            default => 'online',
+            'chinapost' => 'chinapost',
+            'sz56t' => 'leiyi',
+            default => 'fbs',
         };
     }
 }

@@ -77,7 +77,8 @@ class AliExpressService
                 $orders = $data['data']['orders'] ?? [];
 
                 foreach ($orders as $orderData) {
-                    $this->upsertOrder($shop, $orderData);
+                    $order = $this->upsertOrder($shop, $orderData);
+                    $this->enrichOrderItemSkuAttributes($shop, $order);
                     $synced++;
                 }
 
@@ -211,6 +212,10 @@ class AliExpressService
                 'raw_data' => $data,
             ]
         );
+
+        if (!$existingOrder && empty($order->backend_status)) {
+            $order->update(['backend_status' => 'wait_review']);
+        }
 
         $logisticsPayload = [
             'payload' => [
@@ -1389,5 +1394,170 @@ class AliExpressService
         } catch (\Exception $e) {
             return null;
         }
+    }
+
+    public function getProductDetail(Shop $shop, string $productId): ?array
+    {
+        $token = $shop->access_token;
+        if (!$token) {
+            return null;
+        }
+
+        try {
+            $response = Http::withHeaders([
+                'x-auth-token' => $token,
+                'Content-Type' => 'application/json',
+            ])
+                ->withOptions(['verify' => $this->verifySsl])
+                ->timeout(30)
+                ->post($this->baseUrl . '/api/v1/product/get-seller-product', [
+                    'product_id' => $productId,
+                ]);
+
+            $data = $response->json();
+            if (!$response->successful() || isset($data['error'])) {
+                $this->thirdPartyLog()->warning('AliExpress getProductDetail failed', [
+                    'product_id' => $productId,
+                    'response' => $data,
+                ]);
+                return null;
+            }
+
+            return $data['data'] ?? null;
+        } catch (\Exception $e) {
+            $this->thirdPartyLog()->error('AliExpress getProductDetail exception', [
+                'product_id' => $productId,
+                'message' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    public function enrichOrderItemSkuAttributes(Shop $shop, Order $order): int
+    {
+        $items = $order->items()->whereNull('sku_attributes')->get();
+        if ($items->isEmpty()) {
+            return 0;
+        }
+
+        $token = $shop->access_token;
+        if (!$token) {
+            return 0;
+        }
+
+        $productIds = $items->pluck('ae_item_id')->unique()->filter()->values();
+        $enriched = 0;
+
+        foreach ($productIds as $productId) {
+            $product = $this->getProductDetail($shop, (string) $productId);
+            if (!$product || empty($product['sku'])) {
+                continue;
+            }
+
+            $categoryId = $product['category_id'] ?? '';
+            $skuPropertyNames = $this->getCategorySkuPropertyNames($token, $categoryId);
+
+            $skuMap = [];
+            foreach ($product['sku'] as $sku) {
+                $skuId = $sku['sku_id'] ?? '';
+                if (!$skuId) continue;
+
+                $attrs = [];
+                foreach ($sku['property'] ?? [] as $prop) {
+                    $nameId = $prop['name_id'] ?? '';
+                    $valueId = $prop['value_id'] ?? '';
+                    if (!$nameId || !$valueId) continue;
+
+                    $propName = $skuPropertyNames[$nameId]['name'] ?? $nameId;
+                    $propValue = $prop['value'] ?? '';
+
+                    if (!$propValue || str_starts_with($propValue, 'NO_NAME_')) {
+                        $propValue = $this->getCategoryPropertyValue($token, $categoryId, $nameId, $valueId);
+                    }
+
+                    if ($propValue) {
+                        $attrs[$propName] = $propValue;
+                    }
+                }
+                $skuMap[$skuId] = $attrs;
+            }
+
+            $relatedItems = $items->where('ae_item_id', $productId);
+            foreach ($relatedItems as $item) {
+                $skuId = $item->ae_sku_id;
+                if ($skuId && isset($skuMap[$skuId]) && !empty($skuMap[$skuId])) {
+                    $item->update(['sku_attributes' => $skuMap[$skuId]]);
+                    $enriched++;
+                }
+            }
+
+            usleep(200000);
+        }
+
+        return $enriched;
+    }
+
+    protected function getCategorySkuPropertyNames(string $token, string $categoryId): array
+    {
+        if (!$categoryId) return [];
+
+        try {
+            $response = Http::withHeaders([
+                'x-auth-token' => $token,
+                'Content-Type' => 'application/json',
+                'x-request-locale' => 'en_US',
+            ])
+                ->withOptions(['verify' => $this->verifySsl])
+                ->timeout(30)
+                ->post($this->baseUrl . '/api/v1/categories/get', [
+                    'ids' => [$categoryId],
+                ]);
+
+            $data = $response->json();
+            $cat = $data['categories'][0] ?? null;
+            if (!$cat) return [];
+
+            $map = [];
+            foreach ($cat['sku_properties'] ?? [] as $prop) {
+                $map[$prop['id']] = ['name' => $prop['name'] ?? $prop['id']];
+            }
+            return $map;
+        } catch (\Exception $e) {
+            return [];
+        }
+    }
+
+    protected $valueCache = [];
+
+    protected function getCategoryPropertyValue(string $token, string $categoryId, string $propertyId, string $valueId): string
+    {
+        $cacheKey = "{$categoryId}_{$propertyId}";
+        if (!isset($this->valueCache[$cacheKey])) {
+            try {
+                $response = Http::withHeaders([
+                    'x-auth-token' => $token,
+                    'Content-Type' => 'application/json',
+                    'x-request-locale' => 'en_US',
+                ])
+                    ->withOptions(['verify' => $this->verifySsl])
+                    ->timeout(30)
+                    ->post($this->baseUrl . '/api/v1/categories/values-dictionary', [
+                        'category_id' => $categoryId,
+                        'property_id' => $propertyId,
+                        'is_sku_property' => true,
+                    ]);
+
+                $data = $response->json();
+                $map = [];
+                foreach ($data['values'] ?? [] as $v) {
+                    $map[$v['id']] = $v['name'] ?? '';
+                }
+                $this->valueCache[$cacheKey] = $map;
+            } catch (\Exception $e) {
+                $this->valueCache[$cacheKey] = [];
+            }
+        }
+
+        return $this->valueCache[$cacheKey][$valueId] ?? '';
     }
 }

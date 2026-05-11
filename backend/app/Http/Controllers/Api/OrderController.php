@@ -464,6 +464,21 @@ class OrderController extends Controller
     public function syncStart(Request $request)
     {
         $user = $request->user();
+
+        $existingTask = OrderSyncTask::query()
+            ->where('operator_user_id', $user->id)
+            ->whereIn('status', ['pending', 'running'])
+            ->orderByDesc('id')
+            ->first();
+
+        if ($existingTask) {
+            return $this->success([
+                'task_id' => $existingTask->id,
+                'status' => $existingTask->status,
+                'total_shops' => $existingTask->total_shops,
+            ], '已有同步任务正在执行，已返回当前任务');
+        }
+
         $shops = $this->getSyncableShops($user, $request->input('shop_id'));
 
         if ($shops->isEmpty()) {
@@ -717,29 +732,24 @@ class OrderController extends Controller
 
     private function getSyncableShops($user, $shopId = null)
     {
-        if ($shopId) {
-            return Shop::where('id', $shopId)
-                ->whereNotNull('access_token')
-                ->where('access_token', '!=', '')
-                ->get();
-        }
-
-        if ($user->hasRole('super-admin')) {
-            return Shop::whereNotNull('access_token')->where('access_token', '!=', '')->get();
-        }
-
-        if ($this->isTeamAdmin($user)) {
-            $teamIds = Team::where('admin_user_id', $user->id)->pluck('id');
-            return Shop::whereIn('team_id', $teamIds)
-                ->whereNotNull('access_token')
-                ->where('access_token', '!=', '')
-                ->get();
-        }
-
-        return Shop::where('user_id', $user->id)
+        $query = Shop::query()
             ->whereNotNull('access_token')
-            ->where('access_token', '!=', '')
-            ->get();
+            ->where('access_token', '!=', '');
+
+        if (!$user->hasRole('super-admin')) {
+            if ($this->isTeamAdmin($user)) {
+                $teamIds = Team::where('admin_user_id', $user->id)->pluck('id');
+                $query->whereIn('team_id', $teamIds);
+            } else {
+                $query->where('user_id', $user->id);
+            }
+        }
+
+        if ($shopId) {
+            $query->whereKey($shopId);
+        }
+
+        return $query->get();
     }
 
 }

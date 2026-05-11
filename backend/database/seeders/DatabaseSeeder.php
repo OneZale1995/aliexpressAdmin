@@ -137,6 +137,7 @@ class DatabaseSeeder extends Seeder
             ['group' => 'upload', 'key' => 'upload_max_size', 'name' => '最大上传大小(MB)', 'value' => '10', 'type' => 'number', 'sort' => 1],
             ['group' => 'upload', 'key' => 'upload_allowed_ext', 'name' => '允许上传格式', 'value' => 'jpg,jpeg,png,gif,pdf,doc,docx,xls,xlsx', 'type' => 'text', 'sort' => 2],
             ['group' => 'finance', 'key' => 'cny_exchange_rate', 'name' => '人民币汇率', 'value' => '7.2000', 'type' => 'number', 'description' => '用于将利润折算为人民币', 'sort' => 1],
+            ['group' => 'finance', 'key' => 'estimated_receipt_rate', 'name' => '预估回款比例', 'value' => '0.908', 'type' => 'number', 'description' => '用于计算预估回款，公式：销售额 × 比例', 'sort' => 2],
 
             // 中国邮政配置
             ['group' => 'chinapost', 'key' => 'env', 'name' => '运行环境', 'value' => 'test', 'type' => 'select', 'options' => 'test:测试环境,production:正式环境', 'description' => '切换测试/正式环境', 'sort' => 1],

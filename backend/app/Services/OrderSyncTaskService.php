@@ -111,6 +111,20 @@ class OrderSyncTaskService
         }
     }
 
+    public function markShopTaskFailedFromQueue(int $taskId, int $shopId, ?string $error = null): array
+    {
+        $shopName = Shop::find($shopId)?->name ?: ('店铺#' . $shopId);
+
+        return $this->completeShopTask(
+            $taskId,
+            $shopId,
+            $shopName,
+            0,
+            $error ?: '队列任务失败',
+            'failed'
+        );
+    }
+
     private function dispatchShopTasks(OrderSyncTask $task): array
     {
         $options = is_array($task->options) ? $task->options : [];

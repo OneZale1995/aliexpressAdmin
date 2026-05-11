@@ -21,6 +21,15 @@ class SystemConfigController extends Controller
             'description' => '用于将订单利润折算为人民币，示例：7.2',
             'sort' => 1,
         ],
+        [
+            'group' => 'finance',
+            'key' => 'estimated_receipt_rate',
+            'name' => '预估回款比例',
+            'value' => '0.908',
+            'type' => 'number',
+            'description' => '用于计算预估回款，公式：销售额 × 比例',
+            'sort' => 2,
+        ],
     ];
 
     public function index(Request $request)

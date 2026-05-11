@@ -30,6 +30,7 @@
     <order-list-section
       :list="list"
       :list-loading="listLoading"
+      :estimated-receipt-rate="estimatedReceiptRate"
       :selected-orders="selectedOrders"
       :is-all-current-page-selected="isAllCurrentPageSelected"
       :is-current-page-indeterminate="isCurrentPageIndeterminate"
@@ -142,7 +143,6 @@ import {
   printFbsHandoverList,
   readyFbsHandoverForPickup,
   removeFbsLogisticOrdersFromHandover,
-  shipOrder,
   shipFbsOrder,
   shipDbsChinaPostOrder,
   shipDbsLeiyiOrder,
@@ -157,7 +157,7 @@ import {
   updateOrderBackendFields
 } from '@/api/order'
 import { fetchShopList } from '@/api/shop'
-import { fetchDictBatch } from '@/api/system'
+import { fetchConfigList, fetchDictBatch } from '@/api/system'
 import Pagination from '@/components/Pagination'
 import { getToken } from '@/utils/auth'
 import OrderCommentDialog from './components/OrderCommentDialog'
@@ -267,6 +267,7 @@ export default {
       syncProgressDialogVisible: false,
       syncProgress: createDefaultSyncProgress(),
       syncPollTimer: null,
+      estimatedReceiptRate: 0.908,
       dictLabelMap: {},
       issueStatusOptions: []
     }
@@ -302,6 +303,7 @@ export default {
   },
   created() {
     this.loadShops()
+    this.loadFinanceConfigs()
     this.loadOrderDicts()
     this.getStatusCounts()
     this.getBackendStatusCounts()
@@ -320,6 +322,16 @@ export default {
       fetchShopList({ page: 1, limit: 200 }).then(res => {
         this.shopOptions = res.data.items || []
       })
+    },
+    loadFinanceConfigs() {
+      fetchConfigList({ group: 'finance' }).then(res => {
+        const configs = res.data || []
+        const rateConfig = configs.find(item => item.key === 'estimated_receipt_rate')
+        const parsedRate = Number(rateConfig ? rateConfig.value : '')
+        if (!Number.isNaN(parsedRate) && parsedRate > 0) {
+          this.estimatedReceiptRate = parsedRate
+        }
+      }).catch(() => {})
     },
     async loadOrderDicts() {
       const targets = Object.values(ORDER_DICT_CODE)

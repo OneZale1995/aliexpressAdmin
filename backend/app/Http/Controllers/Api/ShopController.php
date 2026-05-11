@@ -60,20 +60,22 @@ class ShopController extends Controller
         ]);
 
         // 非超管自动分配团队
-        $teamId = $request->team_id;
-        if (!$user->hasRole('super-admin')) {
-            if ($this->isTeamAdmin($user)) {
-                $team = Team::where('admin_user_id', $user->id)->first();
-            } else {
-                // 采购用户：通过team_members找到所属团队
-                $team = $user->teams()->first();
+        $teamId = $user->hasRole('super-admin') ? $request->team_id : $this->resolveManagedTeamId($user);
+        if (!$teamId) {
+            if ($user->hasRole('super-admin')) {
+                return $this->fail('请选择所属团队');
             }
-            if (!$team) {
-                return $this->fail('请先加入团队后再添加店铺');
+            return $this->fail('请先加入团队后再添加店铺');
+        }
+
+        $assignedUserId = $user->id;
+        if ($user->hasRole('super-admin') || $this->isTeamAdmin($user)) {
+            if ($request->filled('user_id')) {
+                $assignedUserId = (int) $request->user_id;
+                if (!$this->canAssignPurchaserToTeam((int) $teamId, $assignedUserId)) {
+                    return $this->fail('所选采购不属于当前团队');
+                }
             }
-            $teamId = $team->id;
-        } elseif (!$teamId) {
-            return $this->fail('请选择所属团队');
         }
 
         $shop = Shop::create([
@@ -86,7 +88,7 @@ class ShopController extends Controller
             'logistics_template_name' => $request->logistics_template_name,
             'logistics_route' => $request->logistics_route,
             'team_id' => $teamId,
-            'user_id' => $request->input('user_id', $user->id),
+            'user_id' => $assignedUserId,
             'created_by' => $user->id,
             'updated_by' => $user->id,
         ]);
@@ -104,6 +106,7 @@ class ShopController extends Controller
 
     public function update(Request $request)
     {
+        $user = $request->user();
         $shop = Shop::findOrFail($request->id);
 
         $request->validate([
@@ -119,6 +122,23 @@ class ShopController extends Controller
             'user_id' => 'nullable|exists:admin_users,id',
         ]);
 
+        $teamId = $user->hasRole('super-admin') ? $request->team_id : $this->resolveManagedTeamId($user);
+        if (!$teamId) {
+            return $this->fail('请先加入团队后再编辑店铺');
+        }
+
+        $assignedUserId = $shop->user_id;
+        if ($user->hasRole('super-admin') || $this->isTeamAdmin($user)) {
+            if ($request->filled('user_id')) {
+                $assignedUserId = (int) $request->user_id;
+                if (!$this->canAssignPurchaserToTeam((int) $teamId, $assignedUserId)) {
+                    return $this->fail('所选采购不属于当前团队');
+                }
+            }
+        } else {
+            $assignedUserId = $user->id;
+        }
+
         $shop->update([
             'name' => $request->name,
             'email' => $request->email,
@@ -128,9 +148,9 @@ class ShopController extends Controller
             'logistics_template_id' => $request->logistics_template_id,
             'logistics_template_name' => $request->logistics_template_name,
             'logistics_route' => $request->logistics_route,
-            'team_id' => $request->team_id,
-            'user_id' => $request->input('user_id', $shop->user_id),
-            'updated_by' => $request->user()->id,
+            'team_id' => $teamId,
+            'user_id' => $assignedUserId,
+            'updated_by' => $user->id,
         ]);
 
         return $this->success($shop->load(['user:id,username,nickname', 'team:id,name', 'creator:id,username,nickname', 'updater:id,username,nickname']));
@@ -146,5 +166,26 @@ class ShopController extends Controller
     private function isTeamAdmin($user): bool
     {
         return Team::where('admin_user_id', $user->id)->exists();
+    }
+
+    private function resolveManagedTeamId($user): ?int
+    {
+        if ($this->isTeamAdmin($user)) {
+            return Team::where('admin_user_id', $user->id)->value('id');
+        }
+
+        return $user->teams()->value('teams.id');
+    }
+
+    private function canAssignPurchaserToTeam(int $teamId, int $userId): bool
+    {
+        return Team::whereKey($teamId)
+            ->whereHas('members', function ($query) use ($userId) {
+                $query->where('admin_users.id', $userId)
+                    ->whereHas('roles', function ($roleQuery) {
+                        $roleQuery->where('name', 'purchaser');
+                    });
+            })
+            ->exists();
     }
 }

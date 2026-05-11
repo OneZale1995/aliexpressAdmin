@@ -21,11 +21,10 @@
       </el-table-column>
       <el-table-column label="订单更新" align="center" width="200">
         <template slot-scope="{row}">
-          <div v-if="row.order_updated_at">
-            {{ row.order_updated_at }}
+          <div>
+            {{ row.order_updated_at || '-' }}
             <div><el-button type="text" size="mini" icon="el-icon-refresh" @click="handleRefreshOrder(row)">手动更新</el-button></div>
           </div>
-          <span v-else>-</span>
         </template>
       </el-table-column>
       <el-table-column label="所属团队" align="center" width="120">
@@ -54,6 +53,12 @@
     </el-table>
 
     <pagination v-show="total > 0" :total="total" :page.sync="listQuery.page" :limit.sync="listQuery.limit" @pagination="getList" />
+
+    <order-sync-progress-dialog
+      :visible.sync="syncProgressDialogVisible"
+      :sync-progress="syncProgress"
+      :dict-label-map="syncStatusLabelMap"
+    />
 
     <!-- 新增/编辑对话框 -->
     <el-dialog :title="dialogStatus === 'create' ? '添加店铺' : '编辑店铺'" :visible.sync="dialogFormVisible" width="650px">
@@ -94,14 +99,26 @@
 </template>
 
 <script>
-import { fetchShopList, fetchShopDetail, createShop, updateShop, deleteShop, fetchAllTeams } from '@/api/shop'
+import { fetchShopList, fetchShopDetail, createShop, updateShop, deleteShop, fetchAllTeams, fetchTeamUserList } from '@/api/shop'
+import { syncOrdersStart, fetchSyncProgress } from '@/api/order'
 import { fetchUserList } from '@/api/system'
 import Pagination from '@/components/Pagination'
+import OrderSyncProgressDialog from '@/views/order/components/OrderSyncProgressDialog'
+import { ORDER_DICT_CODE, createDefaultSyncProgress } from '@/views/order/constants'
 import { mapGetters } from 'vuex'
+
+const SYNC_STATUS_LABEL_MAP = {
+  [ORDER_DICT_CODE.syncStatus]: {
+    pending: '排队中',
+    running: '同步中',
+    completed: '已完成',
+    failed: '失败'
+  }
+}
 
 export default {
   name: 'ShopManage',
-  components: { Pagination },
+  components: { Pagination, OrderSyncProgressDialog },
   data() {
     return {
       list: [],
@@ -122,6 +139,11 @@ export default {
       },
       dialogFormVisible: false,
       dialogStatus: '',
+      syncTaskId: null,
+      syncPollTimer: null,
+      syncProgressDialogVisible: false,
+      syncProgress: createDefaultSyncProgress(),
+      syncStatusLabelMap: SYNC_STATUS_LABEL_MAP,
       rules: {
         name: [{ required: true, message: '请输入店铺名称', trigger: 'blur' }]
       }
@@ -147,6 +169,9 @@ export default {
     this.getList()
     this.getTeams()
   },
+  beforeDestroy() {
+    this.stopSyncPolling()
+  },
   methods: {
     getList() {
       this.listLoading = true
@@ -162,7 +187,11 @@ export default {
       })
     },
     getMembers() {
-      fetchUserList({ all: 1 }).then(response => {
+      const fetchMembers = this.isTeamAdmin
+        ? fetchTeamUserList({ all: 1 })
+        : fetchUserList({ all: 1 })
+
+      fetchMembers.then(response => {
         this.memberOptions = response.data.items || response.data
       })
     },
@@ -242,8 +271,73 @@ export default {
         })
       })
     },
+    startSyncPolling() {
+      this.stopSyncPolling()
+      this.pollSyncProgress()
+      this.syncPollTimer = setInterval(() => {
+        this.pollSyncProgress()
+      }, 1500)
+    },
+    stopSyncPolling() {
+      if (this.syncPollTimer) {
+        clearInterval(this.syncPollTimer)
+        this.syncPollTimer = null
+      }
+    },
+    pollSyncProgress() {
+      if (!this.syncTaskId) return
+
+      fetchSyncProgress({ task_id: this.syncTaskId }).then(res => {
+        const data = res.data || {}
+        this.syncProgress = createDefaultSyncProgress({
+          status: data.status || '',
+          progress: data.progress || 0,
+          total_shops: data.total_shops || 0,
+          processed_shops: data.processed_shops || 0,
+          failed_shops: data.failed_shops || 0,
+          synced_orders: data.synced_orders || 0,
+          current_shop_name: data.current_shop_name || '',
+          details: data.details || []
+        })
+
+        if (data.status === 'completed' || data.status === 'failed') {
+          this.stopSyncPolling()
+          this.syncTaskId = null
+          if (data.status === 'completed') {
+            this.$notify({ title: '同步完成', message: `共同步 ${data.synced_orders || 0} 条订单`, type: 'success', duration: 3000 })
+          } else {
+            this.$notify({ title: '同步失败', message: data.message || '请查看同步明细', type: 'error', duration: 4000 })
+          }
+          this.getList()
+        }
+      })
+    },
     handleRefreshOrder(row) {
-      this.$notify({ title: '提示', message: '订单更新功能待实现', type: 'info', duration: 2000 })
+      this.stopSyncPolling()
+      this.syncTaskId = null
+      this.syncProgressDialogVisible = true
+      this.syncProgress = createDefaultSyncProgress({
+        status: 'running',
+        progress: 0,
+        total_shops: 1,
+        current_shop_name: row.name,
+        details: []
+      })
+
+      syncOrdersStart({ shop_id: row.id }).then(res => {
+        const taskId = res && res.data ? res.data.task_id : null
+        if (!taskId) {
+          throw new Error('未返回同步任务ID')
+        }
+
+        this.syncTaskId = taskId
+        this.startSyncPolling()
+      }).catch(() => {
+        this.stopSyncPolling()
+        this.syncTaskId = null
+        this.syncProgressDialogVisible = false
+        this.syncProgress = createDefaultSyncProgress()
+      })
     }
   }
 }

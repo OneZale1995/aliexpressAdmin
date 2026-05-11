@@ -26,6 +26,9 @@ class TeamUserController extends Controller
             if ($request->filled('username')) {
                 $query->where('username', 'like', '%' . $request->username . '%');
             }
+            if ($request->input('all') == 1) {
+                return $this->success($query->orderBy('id', 'desc')->get());
+            }
             return $this->paginate($query, $request);
         }
 
@@ -36,6 +39,10 @@ class TeamUserController extends Controller
         $query = User::with('roles')->whereIn('id', $memberIds);
         if ($request->filled('username')) {
             $query->where('username', 'like', '%' . $request->username . '%');
+        }
+
+        if ($request->input('all') == 1) {
+            return $this->success($query->orderBy('id', 'desc')->get());
         }
 
         return $this->paginate($query, $request);

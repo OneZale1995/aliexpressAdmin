@@ -16,6 +16,10 @@ class RunOrderSyncShopTask implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
+    public int $tries = 3;
+
+    public int $timeout = 180;
+
     public function __construct(public int $taskId, public int $shopId)
     {
     }
@@ -23,5 +27,14 @@ class RunOrderSyncShopTask implements ShouldQueue
     public function handle(OrderSyncTaskService $service): void
     {
         $service->executeShopTask($this->taskId, $this->shopId);
+    }
+
+    public function failed(\Throwable $exception): void
+    {
+        app(OrderSyncTaskService::class)->markShopTaskFailedFromQueue(
+            $this->taskId,
+            $this->shopId,
+            $exception->getMessage()
+        );
     }
 }

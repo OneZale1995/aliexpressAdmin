@@ -49,7 +49,7 @@
                 <div v-else class="goods-title">{{ item.name || '-' }}</div>
                 <div class="goods-category">分类：{{ getCategoryFromSku(item) }}</div>
                 <div v-if="getItemSpec(item)" class="goods-spec">{{ getItemSpec(item) }}</div>
-                <div class="goods-meta">{{ item.sku_code || '-' }} | {{ item.item_price || 0 }} x {{ item.quantity || 1 }}</div>
+                <div class="goods-meta">{{ item.sku_code || '-' }} | {{ item.item_price || 0 }} x <span :class="{ 'qty-badge': (item.quantity || 1) > 1 }">{{ item.quantity || 1 }}</span></div>
               </div>
             </div>
             <div v-if="(order.items || []).length === 0" class="empty-text">暂无商品</div>
@@ -61,7 +61,7 @@
             <div class="meta-line"><span class="label">店铺邮箱</span><span class="clip-text">{{ order.shop ? order.shop.email : '-' }}</span></div>
             <div class="meta-line"><span class="label">订单号</span><span class="order-id">{{ order.ae_order_id }}</span><el-button type="text" size="mini" icon="el-icon-copy-document" class="inline-copy-btn" @click="$emit('copy-text', order.ae_order_id)" /></div>
             <div class="meta-line"><span class="label">下单</span><span class="highlight-date">{{ formatDate(order.ae_created_at) }}</span></div>
-            <div class="meta-line"><span class="label">件数</span><span class="highlight-count">{{ getOrderItemCount(order) }}</span></div>
+            <div class="meta-line"><span class="label">件数</span><span :class="{ 'qty-badge': (getOrderItemCount(order) || 1) > 1 }">{{ getOrderItemCount(order) || 1 }}</span></div>
             <div class="meta-line"><span class="label">买家</span>{{ order.buyer_name || '-' }}</div>
             <div class="meta-line"><span class="label">状态</span><el-tag :type="getStatusTagType(order.order_display_status)" size="mini">{{ getStatusLabel(order.order_display_status) }}</el-tag></div>
             <div v-if="getOrderIssueStatus(order)" class="meta-line">
@@ -106,7 +106,7 @@
             <div class="meta-line"><span class="label">销售额</span><span class="strong">{{ Number(order.total_amount || 0).toFixed(2) }}</span><el-button type="text" size="mini" icon="el-icon-copy-document" class="inline-copy-btn" @click="$emit('copy-text', Number(order.total_amount || 0).toFixed(2))" /></div>
             <div class="meta-line"><span class="label">手续费</span>{{ calcFee(order) }}</div>
             <div class="meta-line"><span class="label">回款</span>{{ calcTotalBack(order) }}</div>
-            <div class="meta-line"><span class="label">预估回款</span>{{ (Number(order.total_amount || 0) * 0.92).toFixed(2) }}<span class="text-muted" style="font-size:11px;margin-left:4px;">(售价×0.92)</span></div>
+            <div class="meta-line"><span class="label">预估回款</span>{{ calcEstimatedReceipt(order) }}<span class="text-muted" style="font-size:11px;margin-left:4px;">(售价×{{ formatEstimatedReceiptRate() }})</span></div>
             <div class="meta-line"><span class="label">采购</span>{{ Number(order.purchase_amount || 0).toFixed(2) }}<el-button type="text" size="mini" icon="el-icon-copy-document" class="inline-copy-btn" @click="$emit('copy-text', Number(order.purchase_amount || 0).toFixed(2))" /></div>
             <div class="meta-line"><span class="label">物流费</span>{{ Number(order.logistics_fee || 0).toFixed(2) }}</div>
             <div class="meta-line"><span class="label">利润</span><span :class="calcProfit(order) >= 0 ? 'text-success' : 'text-danger'">{{ Number(calcProfit(order) || 0).toFixed(2) }}</span></div>
@@ -115,7 +115,7 @@
 
           <div class="col-backend cell-block">
             <div class="meta-line"><span class="label">后台状态</span>{{ getBackendStatusLabel(order.backend_status) }}</div>
-            <div class="meta-line" v-if="getLogisticsTemplateLabel(order.logistics_template)"><span class="label">物流模板</span>{{ getLogisticsTemplateLabel(order.logistics_template) }}</div>
+            <div v-if="getLogisticsTemplateLabel(order.logistics_template)" class="meta-line"><span class="label">物流模板</span>{{ getLogisticsTemplateLabel(order.logistics_template) }}</div>
             <div class="meta-line"><span class="label">采购日期</span>{{ order.purchase_date || '-' }}</div>
             <div class="meta-line"><span class="label">发货日期</span>{{ order.shipping_date || '-' }}</div>
             <div class="meta-line"><span class="label">后台备注</span><span class="clip-text">{{ order.admin_remark || '-' }}</span></div>
@@ -252,12 +252,19 @@ export default {
       type: Number,
       default: null
     },
+    estimatedReceiptRate: {
+      type: Number,
+      default: 0.908
+    },
     dictLabelMap: {
       type: Object,
       default: () => ({})
     }
   },
   methods: {
+    calcEstimatedReceipt(order) {
+      return (Number(order.total_amount || 0) * this.estimatedReceiptRate).toFixed(2)
+    },
     calcFee,
     calcProfit,
     calcProfitRate,
@@ -311,6 +318,9 @@ export default {
     },
     getShipButtonText(order) {
       return isDbsLogisticsType(order.logistics_type) ? 'DBS发货' : 'FBS发货'
+    },
+    formatEstimatedReceiptRate() {
+      return this.estimatedReceiptRate.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
     },
     getItemSpec(item) {
       const skuAttrs = item.sku_attributes || {}
@@ -521,6 +531,20 @@ export default {
   font-size: 12px;
   color: #909399;
   margin-top: 2px;
+}
+
+.qty-badge {
+  display: inline-block;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  background: #f56c6c;
+  color: #fff;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 4px;
 }
 
 .empty-text,

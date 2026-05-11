@@ -2,18 +2,36 @@
 
 namespace App\Services;
 
+use App\Jobs\RunOrderSkuEnrichmentTask;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Shop;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class AliExpressService
 {
+    private const SKU_ENRICH_LOCK_TTL_SECONDS = 600;
+
+    private const PRODUCT_DETAIL_CACHE_TTL_SECONDS = 21600;
+
+    private const PRODUCT_NOT_FOUND_CACHE_TTL_SECONDS = 86400;
+
+    private const CATEGORY_META_CACHE_TTL_SECONDS = 86400;
+
+    private const CATEGORY_VALUE_CACHE_TTL_SECONDS = 86400;
+
     protected string $baseUrl;
     protected bool $verifySsl;
     protected OrderLogisticsService $orderLogisticsService;
     protected AliExpressFbsMockService $fbsMockService;
+
+    protected array $productDetailCache = [];
+
+    protected array $missingProductCache = [];
+
+    protected array $categorySkuPropertyNameCache = [];
 
     public function __construct()
     {
@@ -78,7 +96,7 @@ class AliExpressService
 
                 foreach ($orders as $orderData) {
                     $order = $this->upsertOrder($shop, $orderData);
-                    $this->enrichOrderItemSkuAttributes($shop, $order);
+                    $this->dispatchSkuEnrichmentTask((int) $shop->id, (int) $order->id);
                     $synced++;
                 }
 
@@ -1403,6 +1421,28 @@ class AliExpressService
             return null;
         }
 
+        $cacheKey = $this->productDetailCacheKey((int) $shop->id, $productId);
+        $missingCacheKey = $this->missingProductCacheKey((int) $shop->id, $productId);
+
+        if (array_key_exists($productId, $this->productDetailCache)) {
+            return $this->productDetailCache[$productId];
+        }
+
+        if (!empty($this->missingProductCache[$productId])) {
+            return null;
+        }
+
+        $cachedDetail = Cache::get($cacheKey);
+        if (is_array($cachedDetail)) {
+            $this->productDetailCache[$productId] = $cachedDetail;
+            return $cachedDetail;
+        }
+
+        if (Cache::has($missingCacheKey)) {
+            $this->missingProductCache[$productId] = true;
+            return null;
+        }
+
         try {
             $response = Http::withHeaders([
                 'x-auth-token' => $token,
@@ -1416,6 +1456,12 @@ class AliExpressService
 
             $data = $response->json();
             if (!$response->successful() || isset($data['error'])) {
+                $errorMessage = strtolower((string) ($data['error']['message'] ?? ''));
+                if (str_contains($errorMessage, 'product not found')) {
+                    $this->missingProductCache[$productId] = true;
+                    Cache::put($missingCacheKey, 1, now()->addSeconds(self::PRODUCT_NOT_FOUND_CACHE_TTL_SECONDS));
+                }
+
                 $this->thirdPartyLog()->warning('AliExpress getProductDetail failed', [
                     'product_id' => $productId,
                     'response' => $data,
@@ -1423,7 +1469,13 @@ class AliExpressService
                 return null;
             }
 
-            return $data['data'] ?? null;
+            $detail = $data['data'] ?? null;
+            $this->productDetailCache[$productId] = $detail;
+            if (is_array($detail)) {
+                Cache::put($cacheKey, $detail, now()->addSeconds(self::PRODUCT_DETAIL_CACHE_TTL_SECONDS));
+            }
+
+            return $detail;
         } catch (\Exception $e) {
             $this->thirdPartyLog()->error('AliExpress getProductDetail exception', [
                 'product_id' => $productId,
@@ -1440,39 +1492,120 @@ class AliExpressService
             return 0;
         }
 
-        $token = $shop->access_token;
-        if (!$token) {
-            return 0;
-        }
-
-        $productIds = $items->pluck('ae_item_id')->unique()->filter()->values();
         $enriched = 0;
 
-        foreach ($productIds as $productId) {
-            $product = $this->getProductDetail($shop, (string) $productId);
-            if (!$product || empty($product['sku'])) {
+        // Step 1: 优先使用订单行自带属性，减少对商品与类目接口的依赖。
+        foreach ($items as $item) {
+            $fallbackAttrs = $this->extractSkuAttributesFromItemProperties($item->properties);
+            if (!empty($fallbackAttrs)) {
+                $item->update(['sku_attributes' => $fallbackAttrs]);
+                $enriched++;
+            }
+        }
+
+        $items = $order->items()->whereNull('sku_attributes')->get();
+        if ($items->isEmpty()) {
+            return $enriched;
+        }
+
+        $token = $shop->access_token;
+        if (!$token) {
+            return $enriched;
+        }
+
+        $productIds = $items->pluck('ae_item_id')->unique()->filter()->map(fn($id) => (string) $id)->values()->toArray();
+
+        // Step 2: 批量通过 scroll-short-product-by-filter 获取SKU数据，减少逐条商品详情接口调用。
+        $batchData = $this->fetchProductSkuDataByFilter($token, $productIds);
+        $coveredProductIds = array_keys($batchData);
+        $fallbackProductIds = array_diff($productIds, $coveredProductIds);
+
+        // Step 3: 处理批量接口返回的商品。
+        foreach ($batchData as $productId => $productData) {
+            $categoryId = $productData['category_id'];
+            $skus = $productData['skus'];
+
+            if (empty($skus)) {
+                $items->where('ae_item_id', $productId)->each(function (OrderItem $item) {
+                    $item->update(['sku_attributes' => []]);
+                });
                 continue;
             }
 
-            $categoryId = $product['category_id'] ?? '';
-            $skuPropertyNames = $this->getCategorySkuPropertyNames($token, $categoryId);
+            $skuPropertyNames = $categoryId !== '' ? $this->getCategorySkuPropertyNames($token, $categoryId) : [];
+
+            $resolvedSkuMap = [];
+            foreach ($skus as $skuId => $props) {
+                $attrs = [];
+                foreach ($props as $prop) {
+                    $nameId = $prop['name_id'];
+                    $valueId = $prop['value_id'];
+                    $value = $prop['value'];
+
+                    $propName = $skuPropertyNames[$nameId]['name'] ?? $nameId;
+
+                    if ($value === '' || str_starts_with($value, 'NO_NAME_')) {
+                        $value = $categoryId !== ''
+                            ? $this->getCategoryPropertyValue($token, $categoryId, $nameId, $valueId)
+                            : '';
+                    }
+
+                    if ($value !== '') {
+                        $attrs[$propName] = $value;
+                    }
+                }
+                $resolvedSkuMap[$skuId] = $attrs;
+            }
+
+            $relatedItems = $items->where('ae_item_id', $productId);
+            foreach ($relatedItems as $item) {
+                $skuId = (string) ($item->ae_sku_id ?? '');
+                if ($skuId !== '' && array_key_exists($skuId, $resolvedSkuMap)) {
+                    $attrs = $resolvedSkuMap[$skuId];
+                    $item->update(['sku_attributes' => $attrs]);
+                    if (!empty($attrs)) {
+                        $enriched++;
+                    }
+                }
+            }
+        }
+
+        // Step 4: 对批量接口未返回的商品，降级为逐条调用 getProductDetail。
+        foreach ($fallbackProductIds as $productId) {
+            $product = $this->getProductDetail($shop, $productId);
+            if (!$product || empty($product['sku'])) {
+                // 对已确认不存在或无法获取的商品，写空数组避免后续同步反复请求。
+                $items->where('ae_item_id', $productId)->each(function (OrderItem $item) {
+                    $item->update(['sku_attributes' => []]);
+                });
+                continue;
+            }
+
+            $categoryId = (string) ($product['category_id'] ?? '');
+            $skuPropertyNames = $categoryId !== '' ? $this->getCategorySkuPropertyNames($token, $categoryId) : [];
 
             $skuMap = [];
             foreach ($product['sku'] as $sku) {
                 $skuId = $sku['sku_id'] ?? '';
-                if (!$skuId) continue;
+                if (!$skuId) {
+                    continue;
+                }
 
                 $attrs = [];
                 foreach ($sku['property'] ?? [] as $prop) {
                     $nameId = $prop['name_id'] ?? '';
                     $valueId = $prop['value_id'] ?? '';
-                    if (!$nameId || !$valueId) continue;
+                    if (!$nameId || !$valueId) {
+                        continue;
+                    }
 
                     $propName = $skuPropertyNames[$nameId]['name'] ?? $nameId;
                     $propValue = $prop['value'] ?? '';
 
                     if (!$propValue || str_starts_with($propValue, 'NO_NAME_')) {
-                        $propValue = $this->getCategoryPropertyValue($token, $categoryId, $nameId, $valueId);
+                        $propValue = $categoryId !== ''
+                            ? $this->getCategoryPropertyValue($token, $categoryId, $nameId, $valueId)
+                            : '';
                     }
 
                     if ($propValue) {
@@ -1497,15 +1630,128 @@ class AliExpressService
         return $enriched;
     }
 
+    /**
+     * 批量通过 scroll-short-product-by-filter 获取商品SKU数据。
+     * 返回: [product_id => ['category_id' => string, 'skus' => [sku_id => [['name_id'=>, 'value_id'=>, 'value'=>]]]]]
+     */
+    protected function fetchProductSkuDataByFilter(string $token, array $productIds): array
+    {
+        if (empty($productIds)) {
+            return [];
+        }
+
+        $chunks = array_chunk(array_values(array_unique(array_map('strval', $productIds))), 50);
+        $result = [];
+
+        foreach ($chunks as $chunk) {
+            try {
+                $response = Http::withHeaders([
+                    'x-auth-token' => $token,
+                    'Content-Type' => 'application/json',
+                    'x-request-locale' => 'en',
+                ])
+                    ->withOptions(['verify' => $this->verifySsl])
+                    ->timeout(30)
+                    ->post($this->baseUrl . '/api/v1/scroll-short-product-by-filter', [
+                        'filter' => [
+                            'search_content' => [
+                                'content_type' => 'PRODUCT_ID',
+                                'content_values' => $chunk,
+                            ],
+                        ],
+                        'limit' => count($chunk),
+                    ]);
+
+                $data = $response->json();
+                if (!$response->successful() || isset($data['error'])) {
+                    $this->thirdPartyLog()->warning('AliExpress fetchProductSkuDataByFilter failed', [
+                        'product_ids' => $chunk,
+                        'response' => $data,
+                    ]);
+                    continue;
+                }
+
+                $products = $data['data']['products'] ?? $data['products'] ?? [];
+                foreach ($products as $product) {
+                    $productId = (string) ($product['id'] ?? '');
+                    if ($productId === '') {
+                        continue;
+                    }
+
+                    $categoryId = (string) ($product['category_id'] ?? '');
+                    $skus = [];
+
+                    foreach ($product['sku'] ?? [] as $sku) {
+                        $skuId = (string) ($sku['sku_id'] ?? '');
+                        if ($skuId === '') {
+                            continue;
+                        }
+
+                        $props = [];
+                        if (!empty($sku['property']) && is_array($sku['property'])) {
+                            // 结构化 property 数组格式
+                            foreach ($sku['property'] as $prop) {
+                                $nameId = (string) ($prop['name_id'] ?? '');
+                                $valueId = (string) ($prop['value_id'] ?? '');
+                                if ($nameId !== '' && $valueId !== '') {
+                                    $props[] = [
+                                        'name_id' => $nameId,
+                                        'value_id' => $valueId,
+                                        'value' => (string) ($prop['value'] ?? ''),
+                                    ];
+                                }
+                            }
+                        } elseif (!empty($sku['id']) && is_string($sku['id'])) {
+                            // 解析 "nameId:valueId;nameId:valueId" 紧凑格式
+                            foreach (explode(';', (string) $sku['id']) as $pair) {
+                                $parts = explode(':', $pair, 2);
+                                $nameId = $parts[0] ?? '';
+                                $valueId = $parts[1] ?? '';
+                                if ($nameId !== '' && $valueId !== '') {
+                                    $props[] = ['name_id' => $nameId, 'value_id' => $valueId, 'value' => ''];
+                                }
+                            }
+                        }
+
+                        $skus[$skuId] = $props;
+                    }
+
+                    $result[$productId] = [
+                        'category_id' => $categoryId,
+                        'skus' => $skus,
+                    ];
+                }
+            } catch (\Exception $e) {
+                $this->thirdPartyLog()->error('AliExpress fetchProductSkuDataByFilter exception', [
+                    'product_ids' => $chunk,
+                    'message' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $result;
+    }
+
     protected function getCategorySkuPropertyNames(string $token, string $categoryId): array
     {
         if (!$categoryId) return [];
+
+        if (array_key_exists($categoryId, $this->categorySkuPropertyNameCache)) {
+            return $this->categorySkuPropertyNameCache[$categoryId];
+        }
+
+        $cacheKey = $this->categorySkuPropertyNamesCacheKey($categoryId);
+        $cached = Cache::get($cacheKey);
+        if (is_array($cached)) {
+            $this->categorySkuPropertyNameCache[$categoryId] = $cached;
+            return $cached;
+        }
 
         try {
             $response = Http::withHeaders([
                 'x-auth-token' => $token,
                 'Content-Type' => 'application/json',
-                'x-request-locale' => 'en_US',
+                'x-request-locale' => 'en',
             ])
                 ->withOptions(['verify' => $this->verifySsl])
                 ->timeout(30)
@@ -1521,6 +1767,8 @@ class AliExpressService
             foreach ($cat['sku_properties'] ?? [] as $prop) {
                 $map[$prop['id']] = ['name' => $prop['name'] ?? $prop['id']];
             }
+            $this->categorySkuPropertyNameCache[$categoryId] = $map;
+            Cache::put($cacheKey, $map, now()->addSeconds(self::CATEGORY_META_CACHE_TTL_SECONDS));
             return $map;
         } catch (\Exception $e) {
             return [];
@@ -1531,33 +1779,99 @@ class AliExpressService
 
     protected function getCategoryPropertyValue(string $token, string $categoryId, string $propertyId, string $valueId): string
     {
-        $cacheKey = "{$categoryId}_{$propertyId}";
-        if (!isset($this->valueCache[$cacheKey])) {
-            try {
-                $response = Http::withHeaders([
-                    'x-auth-token' => $token,
-                    'Content-Type' => 'application/json',
-                    'x-request-locale' => 'en_US',
-                ])
-                    ->withOptions(['verify' => $this->verifySsl])
-                    ->timeout(30)
-                    ->post($this->baseUrl . '/api/v1/categories/values-dictionary', [
-                        'category_id' => $categoryId,
-                        'property_id' => $propertyId,
-                        'is_sku_property' => true,
-                    ]);
+        $inMemoryKey = "{$categoryId}_{$propertyId}";
+        if (!isset($this->valueCache[$inMemoryKey])) {
+            $laravelCacheKey = $this->categoryPropertyValuesCacheKey($categoryId, $propertyId);
+            $cached = Cache::get($laravelCacheKey);
+            if (is_array($cached)) {
+                $this->valueCache[$inMemoryKey] = $cached;
+            } else {
+                try {
+                    $response = Http::withHeaders([
+                        'x-auth-token' => $token,
+                        'Content-Type' => 'application/json',
+                        'x-request-locale' => 'en',
+                    ])
+                        ->withOptions(['verify' => $this->verifySsl])
+                        ->timeout(30)
+                        ->post($this->baseUrl . '/api/v1/categories/values-dictionary', [
+                            'category_id' => $categoryId,
+                            'property_id' => $propertyId,
+                            'is_sku_property' => true,
+                        ]);
 
-                $data = $response->json();
-                $map = [];
-                foreach ($data['values'] ?? [] as $v) {
-                    $map[$v['id']] = $v['name'] ?? '';
+                    $data = $response->json();
+                    $map = [];
+                    foreach ($data['values'] ?? [] as $v) {
+                        $map[$v['id']] = $v['name'] ?? '';
+                    }
+                    $this->valueCache[$inMemoryKey] = $map;
+                    Cache::put($laravelCacheKey, $map, now()->addSeconds(self::CATEGORY_VALUE_CACHE_TTL_SECONDS));
+                } catch (\Exception $e) {
+                    $this->valueCache[$inMemoryKey] = [];
                 }
-                $this->valueCache[$cacheKey] = $map;
-            } catch (\Exception $e) {
-                $this->valueCache[$cacheKey] = [];
             }
         }
 
-        return $this->valueCache[$cacheKey][$valueId] ?? '';
+        return $this->valueCache[$inMemoryKey][$valueId] ?? '';
+    }
+
+    protected function productDetailCacheKey(int $shopId, string $productId): string
+    {
+        return sprintf('ali:product-detail:%d:%s', $shopId, $productId);
+    }
+
+    protected function missingProductCacheKey(int $shopId, string $productId): string
+    {
+        return sprintf('ali:product-missing:%d:%s', $shopId, $productId);
+    }
+
+    protected function categorySkuPropertyNamesCacheKey(string $categoryId): string
+    {
+        return sprintf('ali:category-sku-props:%s', $categoryId);
+    }
+
+    protected function categoryPropertyValuesCacheKey(string $categoryId, string $propertyId): string
+    {
+        return sprintf('ali:category-prop-values:%s:%s', $categoryId, $propertyId);
+    }
+
+    protected function extractSkuAttributesFromItemProperties($properties): array
+    {
+        if (!is_array($properties) || empty($properties)) {
+            return [];
+        }
+
+        $attrs = [];
+        foreach ($properties as $key => $value) {
+            if (is_array($value)) {
+                continue;
+            }
+
+            $name = trim((string) $key);
+            $val = trim((string) $value);
+            if ($name === '' || $val === '' || str_starts_with($val, 'NO_NAME_')) {
+                continue;
+            }
+
+            $attrs[$name] = $val;
+        }
+
+        return $attrs;
+    }
+
+    protected function dispatchSkuEnrichmentTask(int $shopId, int $orderId): void
+    {
+        $lockKey = $this->skuEnrichLockKey($orderId);
+        if (!Cache::add($lockKey, now()->toDateTimeString(), now()->addSeconds(self::SKU_ENRICH_LOCK_TTL_SECONDS))) {
+            return;
+        }
+
+        RunOrderSkuEnrichmentTask::dispatch($shopId, $orderId);
+    }
+
+    protected function skuEnrichLockKey(int $orderId): string
+    {
+        return sprintf('ali:order-sku-enrich:lock:%d', $orderId);
     }
 }

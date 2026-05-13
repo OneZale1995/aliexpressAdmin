@@ -1455,7 +1455,7 @@ class AliExpressService
         }
     }
 
-    public function getProductDetail(Shop $shop, string $productId): ?array
+    public function getProductDetail(Shop $shop, string $productId, bool $skipCategorySync = false): ?array
     {
         $token = $shop->access_token;
         if (!$token) {
@@ -1468,8 +1468,9 @@ class AliExpressService
                 'Content-Type' => 'application/json',
             ])
                 ->withOptions(['verify' => $this->verifySsl])
-                ->timeout(30)
-                ->retry(2, 2000, function (\Throwable $e) {
+                ->connectTimeout(5)
+                ->timeout(12)
+                ->retry(1, 500, function (\Throwable $e) {
                     return $this->isTransientNetworkError($e);
                 })
                 ->post($this->baseUrl . '/api/v1/product/get-seller-product', [
@@ -1493,7 +1494,7 @@ class AliExpressService
 
             $detail = $data['data'] ?? null;
             if (is_array($detail)) {
-                $this->upsertProduct($shop, $detail);
+                $this->upsertProduct($shop, $detail, $skipCategorySync);
             }
 
             return $detail;
@@ -1904,7 +1905,7 @@ class AliExpressService
         }
     }
 
-    protected function upsertProduct(Shop $shop, array $detail): void
+    protected function upsertProduct(Shop $shop, array $detail, bool $skipCategorySync = false): void
     {
         $aeItemId = (string) ($detail['id'] ?? '');
         if ($aeItemId === '') {
@@ -1926,8 +1927,11 @@ class AliExpressService
 
         $categoryId = (string) ($detail['category_id'] ?? '');
         $shippingTemplateId = (string) ($detail['freight_template_id'] ?? '');
-        $category = $categoryId !== '' ? $this->syncCategoryMeta($shop->access_token, $categoryId, $shippingTemplateId) : null;
-        $categoryName = (string) ($category->name ?? '');
+        $categoryName = '';
+        if ($categoryId !== '' && !$skipCategorySync) {
+            $category = $this->syncCategoryMeta($shop->access_token, $categoryId, $shippingTemplateId);
+            $categoryName = (string) ($category->name ?? '');
+        }
 
         // 取商品价格：优先用商品级别 price，没有则取第一个 SKU 的 price
         $price = (string) ($detail['price'] ?? '');
@@ -2008,6 +2012,76 @@ class AliExpressService
         return (string) ($category->name ?? '');
     }
 
+    public function batchSyncCategories(string $token, array $categoryIds, string $shippingTemplateId = ''): int
+    {
+        $missing = [];
+        foreach (array_unique($categoryIds) as $id) {
+            if ($id === '') continue;
+            $existing = AliCategory::where('category_id', $id)->first();
+            if (!$existing || !$existing->synced_at || !$this->categoryMetaFullySynced($existing)) {
+                $missing[] = $id;
+            }
+        }
+
+        if (empty($missing)) {
+            return 0;
+        }
+
+        $synced = 0;
+        $chunks = array_chunk($missing, 20);
+
+        foreach ($chunks as $chunk) {
+            try {
+                $response = Http::withHeaders([
+                    'x-auth-token' => $token,
+                    'Content-Type' => 'application/json',
+                    'x-request-locale' => 'en',
+                ])
+                    ->withOptions(['verify' => $this->verifySsl])
+                    ->connectTimeout(5)
+                    ->timeout(10)
+                    ->retry(1, 500, function (\Throwable $e) {
+                        return $this->isTransientNetworkError($e);
+                    })
+                    ->post($this->baseUrl . '/api/v1/categories/get', [
+                        'ids' => $chunk,
+                    ]);
+
+                $data = $response->json();
+                $categories = $data['categories'] ?? [];
+
+                foreach ($categories as $categoryData) {
+                    if (!is_array($categoryData)) continue;
+                    $categoryId = (string) ($categoryData['id'] ?? '');
+                    if ($categoryId === '') continue;
+
+                    AliCategory::updateOrCreate(
+                        ['category_id' => $categoryId],
+                        [
+                            'parent_id' => (string) ($categoryData['parent_id'] ?? ''),
+                            'name' => (string) ($categoryData['name'] ?? ''),
+                            'is_leaf' => (bool) ($categoryData['is_leaf'] ?? false),
+                            'is_special' => (bool) ($categoryData['is_special'] ?? false),
+                            'is_visible' => array_key_exists('is_visible', $categoryData) ? (bool) $categoryData['is_visible'] : null,
+                            'raw_data' => $categoryData,
+                            'synced_at' => now(),
+                        ]
+                    );
+
+                    $this->persistCategoryProperties($token, $categoryId, $categoryData, $shippingTemplateId);
+                    $synced++;
+                }
+            } catch (\Throwable $e) {
+                $this->thirdPartyLog()->warning('AliExpress batchSyncCategories failed', [
+                    'ids' => $chunk,
+                    'message' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $synced;
+    }
+
     protected function syncCategoryMeta(string $token, string $categoryId, string $shippingTemplateId = ''): ?AliCategory
     {
         if ($categoryId === '') {
@@ -2019,48 +2093,9 @@ class AliExpressService
             return $existing;
         }
 
-        try {
-            $response = Http::withHeaders([
-                'x-auth-token' => $token,
-                'Content-Type' => 'application/json',
-                'x-request-locale' => 'en',
-            ])
-                ->withOptions(['verify' => $this->verifySsl])
-                ->timeout(30)
-                ->post($this->baseUrl . '/api/v1/categories/get', [
-                    'ids' => [$categoryId],
-                ]);
+        $this->batchSyncCategories($token, [$categoryId], $shippingTemplateId);
 
-            $data = $response->json();
-            $categoryData = $data['categories'][0] ?? null;
-            if (!is_array($categoryData)) {
-                return $existing;
-            }
-
-            $category = AliCategory::updateOrCreate(
-                ['category_id' => $categoryId],
-                [
-                    'parent_id' => (string) ($categoryData['parent_id'] ?? ''),
-                    'name' => (string) ($categoryData['name'] ?? ''),
-                    'is_leaf' => (bool) ($categoryData['is_leaf'] ?? false),
-                    'is_special' => (bool) ($categoryData['is_special'] ?? false),
-                    'is_visible' => array_key_exists('is_visible', $categoryData) ? (bool) $categoryData['is_visible'] : null,
-                    'raw_data' => $categoryData,
-                    'synced_at' => now(),
-                ]
-            );
-
-            $this->persistCategoryProperties($token, $categoryId, $categoryData, $shippingTemplateId);
-
-            return $category;
-        } catch (\Throwable $e) {
-            $this->thirdPartyLog()->warning('AliExpress syncCategoryMeta failed', [
-                'category_id' => $categoryId,
-                'message' => $e->getMessage(),
-            ]);
-
-            return $existing;
-        }
+        return AliCategory::where('category_id', $categoryId)->first() ?: $existing;
     }
 
     protected function categoryMetaFullySynced(AliCategory $category): bool
@@ -2171,7 +2206,11 @@ class AliExpressService
                 'x-request-locale' => 'en',
             ])
                 ->withOptions(['verify' => $this->verifySsl])
-                ->timeout(30)
+                ->connectTimeout(5)
+                ->timeout(8)
+                ->retry(1, 500, function (\Throwable $e) {
+                    return $this->isTransientNetworkError($e);
+                })
                 ->post($this->baseUrl . '/api/v1/categories/values-dictionary', $payload);
 
             $data = $response->json();

@@ -63,15 +63,36 @@ class EnrichSkuAttributes extends Command
         if (count($missingIds) > 0) {
             $this->info('Pre-fetching ' . count($missingIds) . ' missing products...');
             $syncBar = $this->output->createProgressBar(count($missingIds));
-            $syncBar->setFormat(" %current%/%max% [%bar%] %percent:3s%%  %message%");
+            $syncBar->setFormat(" %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s%  %message%");
 
             foreach ($missingIds as $p) {
                 $syncBar->setMessage("Product #{$p['product_id']}");
-                $service->getProductDetail($p['shop'], $p['product_id']);
+                $service->getProductDetail($p['shop'], $p['product_id'], true);
                 $syncBar->advance();
             }
             $syncBar->finish();
             $this->line('');
+        }
+
+        // 批量预同步类目数据（每批20个，大幅减少API调用）
+        $allProductIds = $uniqueProductIds->pluck('product_id')->unique()->values()->toArray();
+        if (!empty($allProductIds)) {
+            $firstShop = $orders->first()->shop ?? null;
+            if ($firstShop && $firstShop->access_token) {
+                $categoryIds = Product::whereIn('ae_item_id', $allProductIds)
+                    ->whereNotNull('category_id')
+                    ->where('category_id', '!=', '')
+                    ->pluck('category_id')
+                    ->unique()
+                    ->values()
+                    ->toArray();
+
+                if (!empty($categoryIds)) {
+                    $this->info('Batch-syncing ' . count($categoryIds) . ' categories...');
+                    $synced = $service->batchSyncCategories($firstShop->access_token, $categoryIds);
+                    $this->info("Categories synced: {$synced}");
+                }
+            }
         }
 
         $this->info('Enriching SKU attributes...');

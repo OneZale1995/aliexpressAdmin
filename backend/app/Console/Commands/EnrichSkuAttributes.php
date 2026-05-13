@@ -25,24 +25,37 @@ class EnrichSkuAttributes extends Command
         }
 
         $orders = $query->limit($limit)->get();
+        $total = $orders->count();
 
-        $this->info("Found {$orders->count()} orders to enrich.");
+        $this->info("Found {$total} orders to enrich.");
+
+        $bar = $this->output->createProgressBar($total);
+        $bar->setFormat(" %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s%  %message%");
 
         $service = new AliExpressService();
         $totalEnriched = 0;
+        $startTime = microtime(true);
 
-        foreach ($orders as $order) {
-            if (!$order->shop) continue;
+        foreach ($orders as $idx => $order) {
+            $bar->setMessage("Order #{$order->ae_order_id}");
 
-            $enriched = $service->enrichOrderItemSkuAttributes($order->shop, $order);
+            if (!$order->shop) {
+                $bar->advance();
+                continue;
+            }
+
+            $enriched = $service->enrichOrderItemSkuAttributes($order->shop, $order, $force);
             $totalEnriched += $enriched;
 
-            if ($enriched > 0) {
-                $this->line("  Order {$order->ae_order_id}: enriched {$enriched} items");
-            }
+            $bar->advance();
         }
 
-        $this->info("Done. Enriched {$totalEnriched} items total.");
+        $bar->finish();
+        $this->line('');
+
+        $elapsed = round(microtime(true) - $startTime, 1);
+        $this->info("Done. {$total} orders processed, {$totalEnriched} items enriched in {$elapsed}s.");
+
         return 0;
     }
 }

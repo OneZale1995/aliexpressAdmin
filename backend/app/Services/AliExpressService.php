@@ -1624,9 +1624,13 @@ class AliExpressService
         }
     }
 
-    public function enrichOrderItemSkuAttributes(Shop $shop, Order $order): int
+    public function enrichOrderItemSkuAttributes(Shop $shop, Order $order, bool $force = false): int
     {
-        $items = $order->items()->whereNull('sku_attributes')->get();
+        $itemsQuery = $order->items();
+        if (!$force) {
+            $itemsQuery->whereNull('sku_attributes');
+        }
+        $items = $itemsQuery->get();
         if ($items->isEmpty()) {
             return 0;
         }

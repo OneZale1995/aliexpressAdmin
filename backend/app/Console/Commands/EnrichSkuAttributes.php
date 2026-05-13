@@ -61,14 +61,26 @@ class EnrichSkuAttributes extends Command
         }
 
         if (count($missingIds) > 0) {
-            $this->info('Pre-fetching ' . count($missingIds) . ' missing products...');
+            // 按店铺分组，每批10个并发请求
+            $byShop = [];
+            foreach ($missingIds as $p) {
+                $byShop[$p['shop_id']][] = $p;
+            }
+
+            $this->info('Pre-fetching ' . count($missingIds) . ' missing products (10 concurrent)...');
             $syncBar = $this->output->createProgressBar(count($missingIds));
             $syncBar->setFormat(" %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s%  %message%");
 
-            foreach ($missingIds as $p) {
-                $syncBar->setMessage("Product #{$p['product_id']}");
-                $service->getProductDetail($p['shop'], $p['product_id'], true);
-                $syncBar->advance();
+            foreach ($byShop as $shopId => $products) {
+                $shop = $products[0]['shop'];
+                $pids = array_column($products, 'product_id');
+                $synced = 0;
+
+                foreach (array_chunk($pids, 10) as $chunk) {
+                    $syncBar->setMessage("Shop #{$shopId} (" . count($chunk) . ' concurrent)');
+                    $service->batchGetProductDetails($shop, $chunk, 10);
+                    $syncBar->advance(count($chunk));
+                }
             }
             $syncBar->finish();
             $this->line('');

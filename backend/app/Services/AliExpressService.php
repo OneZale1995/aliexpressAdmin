@@ -1625,7 +1625,7 @@ class AliExpressService
         }
     }
 
-    public function enrichOrderItemSkuAttributes(Shop $shop, Order $order, bool $force = false): int
+    public function enrichOrderItemSkuAttributes(Shop $shop, Order $order, bool $force = false, bool $dispatchJobs = true): int
     {
         $itemsQuery = $order->items();
         if (!$force) {
@@ -1651,7 +1651,9 @@ class AliExpressService
                 ->first();
 
             if (!$localProduct || empty($localProduct->skus)) {
+                if ($dispatchJobs) {
                 RunShopProductDetailSyncJob::dispatch((int) $shop->id, $productId)->onQueue('products');
+            }
                 continue;
             }
 
@@ -1666,7 +1668,9 @@ class AliExpressService
             }
 
             if (!$hasFullPropertyData) {
+                if ($dispatchJobs) {
                 RunShopProductDetailSyncJob::dispatch((int) $shop->id, $productId)->onQueue('products');
+            }
                 continue;
             }
 

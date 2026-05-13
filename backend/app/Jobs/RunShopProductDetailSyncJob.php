@@ -54,7 +54,7 @@ class RunShopProductDetailSyncJob implements ShouldQueue
 
         $orders = Order::with('items')->whereIn('id', $orderIds)->get();
         foreach ($orders as $order) {
-            $service->enrichOrderItemSkuAttributes($shop, $order);
+            $service->enrichOrderItemSkuAttributes($shop, $order, false, false);
         }
     }
 

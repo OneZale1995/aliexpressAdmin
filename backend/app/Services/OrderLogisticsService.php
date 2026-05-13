@@ -148,7 +148,7 @@ class OrderLogisticsService
         return match ($logistics->provider_code) {
             'chinapost' => 'chinapost',
             'sz56t' => 'leiyi',
-            default => 'fbs',
+            default => '',
         };
     }
 }

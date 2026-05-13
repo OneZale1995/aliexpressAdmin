@@ -163,6 +163,28 @@ class OrderFbsWorkflowService
         ];
     }
 
+    public function setBigBagCount(Order $order, int $bigBagCount, ?int $handoverListId = null): array
+    {
+        $targetId = $handoverListId ?: (int) $order->handover_list_id;
+        if ($targetId <= 0) {
+            return ['success' => false, 'message' => '当前订单暂无交接清单ID'];
+        }
+        if ($bigBagCount <= 0) {
+            return ['success' => false, 'message' => '大袋数量必须大于 0'];
+        }
+
+        $result = $this->aliExpressService->setBigBagCountForHandoverList($order->shop, $targetId, $bigBagCount);
+        if (!$result['success']) {
+            return ['success' => false, 'message' => $result['message'] ?? '设置大袋数量失败'];
+        }
+
+        return [
+            'success' => true,
+            'message' => $result['message'] ?? '大袋数量已设置',
+            'data' => $result['data'] ?? null,
+        ];
+    }
+
     public function readyForPickup(Order $order, ?int $handoverListId = null): array
     {
         $targetId = $handoverListId ?: (int) $order->handover_list_id;

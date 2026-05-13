@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\RunShopProductSyncJob;
 use App\Models\Shop;
 use App\Models\Team;
 use App\Traits\ApiResponse;
@@ -70,11 +71,13 @@ class ShopController extends Controller
 
         $assignedUserId = $user->id;
         if ($user->hasRole('super-admin') || $this->isTeamAdmin($user)) {
-            if ($request->filled('user_id')) {
-                $assignedUserId = (int) $request->user_id;
-                if (!$this->canAssignPurchaserToTeam((int) $teamId, $assignedUserId)) {
-                    return $this->fail('所选采购不属于当前团队');
-                }
+            if (!$request->filled('user_id')) {
+                return $this->fail('请选择所属采购');
+            }
+
+            $assignedUserId = (int) $request->user_id;
+            if (!$this->canAssignPurchaserToTeam((int) $teamId, $assignedUserId)) {
+                return $this->fail('所选采购不属于当前团队');
             }
         }
 
@@ -92,6 +95,11 @@ class ShopController extends Controller
             'created_by' => $user->id,
             'updated_by' => $user->id,
         ]);
+
+        // 如有 access_token，异步拉取该店铺商品列表
+        if ($shop->access_token) {
+            RunShopProductSyncJob::dispatch($shop->id)->onQueue('products');
+        }
 
         return $this->success($shop->load(['user:id,username,nickname', 'team:id,name']));
     }
@@ -119,7 +127,7 @@ class ShopController extends Controller
             'logistics_template_name' => 'nullable|string|max:200',
             'logistics_route' => 'nullable|string|max:200',
             'team_id' => 'required|exists:teams,id',
-            'user_id' => 'nullable|exists:admin_users,id',
+            'user_id' => 'required|exists:admin_users,id',
         ]);
 
         $teamId = $user->hasRole('super-admin') ? $request->team_id : $this->resolveManagedTeamId($user);
@@ -129,15 +137,19 @@ class ShopController extends Controller
 
         $assignedUserId = $shop->user_id;
         if ($user->hasRole('super-admin') || $this->isTeamAdmin($user)) {
-            if ($request->filled('user_id')) {
-                $assignedUserId = (int) $request->user_id;
-                if (!$this->canAssignPurchaserToTeam((int) $teamId, $assignedUserId)) {
-                    return $this->fail('所选采购不属于当前团队');
-                }
+            if (!$request->filled('user_id')) {
+                return $this->fail('请选择所属采购');
+            }
+
+            $assignedUserId = (int) $request->user_id;
+            if (!$this->canAssignPurchaserToTeam((int) $teamId, $assignedUserId)) {
+                return $this->fail('所选采购不属于当前团队');
             }
         } else {
             $assignedUserId = $user->id;
         }
+
+        $tokenChanged = $request->access_token !== $shop->access_token;
 
         $shop->update([
             'name' => $request->name,
@@ -152,6 +164,10 @@ class ShopController extends Controller
             'user_id' => $assignedUserId,
             'updated_by' => $user->id,
         ]);
+
+        if ($tokenChanged) {
+            $shop->update(['token_invalid_at' => null]);
+        }
 
         return $this->success($shop->load(['user:id,username,nickname', 'team:id,name', 'creator:id,username,nickname', 'updater:id,username,nickname']));
     }

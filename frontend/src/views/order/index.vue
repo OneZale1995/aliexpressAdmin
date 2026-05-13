@@ -73,6 +73,7 @@
       @remove-fbs-from-handover="removeFbsFromHandover"
       @print-fbs-label="printCurrentFbsLabel"
       @print-fbs-handover-label="printCurrentFbsHandoverLabel"
+      @set-fbs-big-bag-count="setCurrentFbsHandoverBigBagCount"
       @mark-fbs-ready-for-pickup="markCurrentFbsReadyForPickup"
       @transfer-fbs-handover-list="transferCurrentFbsHandoverList"
       @refresh-fbs-workflow="refreshCurrentFbsWorkflow"
@@ -142,6 +143,7 @@ import {
   getOrderLabel,
   printFbsHandoverList,
   readyFbsHandoverForPickup,
+  setFbsHandoverBigBagCount,
   removeFbsLogisticOrdersFromHandover,
   shipFbsOrder,
   shipDbsChinaPostOrder,
@@ -939,6 +941,7 @@ export default {
         logistic_order_id: order.logistic_order_id || null,
         handover_list_id: order.handover_list_id || null,
         handover_list_status: order.handover_list_status || '',
+        big_bag_count: 1,
         workflow_loading: !isDbs
       })
       if (isDbs) {
@@ -1457,6 +1460,30 @@ export default {
       }).catch(err => {
         this.closePendingPrintWindow(printWindow)
         this.showError(err, '交接清单打印失败')
+      })
+    },
+    setCurrentFbsHandoverBigBagCount() {
+      if (!this.shipForm.handover_list_id) {
+        this.$message.warning('请先创建交接清单')
+        return
+      }
+      const count = parseInt(this.shipForm.big_bag_count, 10)
+      if (!count || count <= 0) {
+        this.$message.warning('请输入有效的大袋数量')
+        return
+      }
+
+      this.shipping = true
+      setFbsHandoverBigBagCount({
+        id: this.shipForm.id,
+        handover_list_id: this.shipForm.handover_list_id,
+        big_bag_count: count
+      }).then(res => {
+        this.$message.success(res.message || '大袋数量已设置')
+      }).catch(err => {
+        this.showError(err, '设置大袋数量失败')
+      }).finally(() => {
+        this.shipping = false
       })
     },
     markCurrentFbsReadyForPickup() {

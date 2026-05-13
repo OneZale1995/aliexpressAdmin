@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Order;
+use App\Services\LogisticsConfigResolver;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -19,15 +20,19 @@ class Sz56tService
     protected ?string $customerUserid = null;
     protected string $tradeType;
 
-    public function __construct()
+    public function __construct(?Order $order = null)
     {
         $config = config('services.sz56t', []);
+        $resolver = new LogisticsConfigResolver();
+        $resolved = $resolver->resolveForOrder($order, LogisticsConfigResolver::PROVIDER_SZ56T);
+        $scopeConfig = is_array($resolved['config'] ?? null) ? $resolved['config'] : [];
+
         $this->apiUrl = rtrim($config['api_url'] ?? 'http://139.199.207.170:8082', '/');
         $this->labelUrl = rtrim($config['label_url'] ?? 'http://139.199.207.170:8089', '/');
         $this->cancelApiUrl = $config['cancel_api_url'] ?? 'http://139.199.207.170:8082/logistics/api';
         $this->cancelAuth = $config['cancel_auth'] ?? '';
-        $this->username = $config['username'] ?? '';
-        $this->password = $config['password'] ?? '';
+        $this->username = (string) ($scopeConfig['username'] ?? ($config['username'] ?? ''));
+        $this->password = (string) ($scopeConfig['password'] ?? ($config['password'] ?? ''));
         $this->customerId = $config['customer_id'] ?? null;
         $this->customerUserid = $config['customer_userid'] ?? null;
         $this->tradeType = $config['trade_type'] ?? 'ZYXT';

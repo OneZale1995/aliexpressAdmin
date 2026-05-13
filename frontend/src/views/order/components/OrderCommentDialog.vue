@@ -23,7 +23,7 @@
         </el-col>
         <el-col :span="12">
           <el-form-item label="重量(kg)">
-            <el-input v-model.number="commentTemp.weight" type="number" min="0" placeholder="输入重量自动算物流费" @input="calcLogisticsFee" />
+            <el-input-number v-model="commentTemp.weight" :step="0.01" style="width: 100%;" @change="calcLogisticsFee" />
           </el-form-item>
         </el-col>
       </el-row>
@@ -105,7 +105,7 @@ export default {
       set(value) {
         this.$emit('update:visible', value)
       }
-    },
+    }
   },
   watch: {
     visible(v) {

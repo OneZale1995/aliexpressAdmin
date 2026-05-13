@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
 # ============================================================
 #  AliExpress Admin 一键部署脚本
@@ -25,6 +25,27 @@ log()   { echo -e "${GREEN}[$(date '+%H:%M:%S')] $1${NC}"; }
 warn()  { echo -e "${YELLOW}[$(date '+%H:%M:%S')] $1${NC}"; }
 fail()  { echo -e "${RED}[$(date '+%H:%M:%S')] $1${NC}"; exit 1; }
 
+BACKEND_MAINTENANCE=0
+
+clear_backend_bootstrap_cache() {
+    local cache_dir="$BACKEND_DIR/bootstrap/cache"
+
+    if [ -d "$cache_dir" ]; then
+        log "清理 bootstrap/cache 下旧缓存文件..."
+        rm -f "$cache_dir"/*.php
+    fi
+}
+
+cleanup() {
+    if [ "${BACKEND_MAINTENANCE:-0}" -eq 1 ] && [ -d "${BACKEND_DIR:-}" ]; then
+        warn "部署未完成，正在关闭维护模式..."
+        cd "$BACKEND_DIR" 2>/dev/null || return
+        $PHP_BIN artisan up >/dev/null 2>&1 || true
+    fi
+}
+
+trap cleanup EXIT
+
 deploy_backend() {
     echo ""
     echo "============================================"
@@ -37,21 +58,29 @@ deploy_backend() {
     # 开启维护模式
     log "开启维护模式..."
     $PHP_BIN artisan down --retry=30 || true
+    BACKEND_MAINTENANCE=1
 
     # 拉取最新代码
     log "拉取最新代码..."
-    git pull origin "$GIT_BRANCH" || { $PHP_BIN artisan up; fail "git pull 失败"; }
+    git pull --ff-only origin "$GIT_BRANCH"
+
+    # composer install 会触发 artisan package:discover，先删掉旧缓存文件避免读取旧配置
+    clear_backend_bootstrap_cache
 
     # 安装依赖
     log "安装 Composer 依赖..."
     $COMPOSER_BIN install --no-dev --optimize-autoloader --no-interaction
 
+    # 先清旧缓存，确保迁移和后续命令读取到最新配置
+    log "清理旧缓存..."
+    $PHP_BIN artisan optimize:clear
+
     # 数据库迁移
     log "执行数据库迁移..."
     $PHP_BIN artisan migrate --force
 
-    # 清除旧缓存再重建
-    log "优化项目..."
+    # 重建缓存
+    log "重建缓存..."
     $PHP_BIN artisan config:cache
     $PHP_BIN artisan route:cache
     $PHP_BIN artisan view:cache
@@ -67,6 +96,7 @@ deploy_backend() {
     # 关闭维护模式
     log "关闭维护模式..."
     $PHP_BIN artisan up
+    BACKEND_MAINTENANCE=0
 
     log "后端更新完成"
 }
@@ -81,7 +111,7 @@ deploy_frontend() {
     cd "$FRONTEND_DIR"
 
     log "拉取最新代码..."
-    git pull origin "$GIT_BRANCH"
+    git pull --ff-only origin "$GIT_BRANCH"
 
     log "前端更新完成（静态文件，即拉即生效）"
 }

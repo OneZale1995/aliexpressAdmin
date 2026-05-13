@@ -32,4 +32,10 @@ class OrderItem extends Model
     {
         return $this->belongsTo(Order::class);
     }
+
+    public function product()
+    {
+        return $this->belongsTo(Product::class, 'ae_item_id', 'ae_item_id')
+            ->where('products.shop_id', $this->order?->shop_id ?? 0);
+    }
 }

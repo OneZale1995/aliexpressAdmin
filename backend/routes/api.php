@@ -6,11 +6,13 @@ use App\Http\Controllers\Api\DictController;
 use App\Http\Controllers\Api\ExportController;
 use App\Http\Controllers\Api\FileController;
 use App\Http\Controllers\Api\LoginLogController;
+use App\Http\Controllers\Api\LogisticsConfigController;
 use App\Http\Controllers\Api\MenuController;
 use App\Http\Controllers\Api\OperationLogController;
 use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\OrderLogisticsController;
 use App\Http\Controllers\Api\PermissionController;
+use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\ShopController;
@@ -73,6 +75,10 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     Route::post('/system-configs/delete', [SystemConfigController::class, 'destroy']);
     Route::post('/system-configs/batch', [SystemConfigController::class, 'batchSave']);
 
+    // 物流作用域配置（用户/团队）
+    Route::post('/logistics-configs/current', [LogisticsConfigController::class, 'current']);
+    Route::post('/logistics-configs/save', [LogisticsConfigController::class, 'save']);
+
     // 数据字典
     Route::post('/dict-types/list', [DictController::class, 'typeIndex']);
     Route::post('/dict-types/create', [DictController::class, 'typeStore']);
@@ -124,6 +130,15 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     Route::post('/shops/update', [ShopController::class, 'update']);
     Route::post('/shops/delete', [ShopController::class, 'destroy']);
 
+    // 商品管理
+    Route::post('/products/list', [ProductController::class, 'index']);
+    Route::post('/products/export', [ProductController::class, 'export']);
+    Route::post('/products/export-history', [ProductController::class, 'exportHistory']);
+    Route::post('/products/export-progress', [ProductController::class, 'exportProgress']);
+    Route::post('/products/export-download', [ProductController::class, 'downloadExport']);
+    Route::post('/products/export-delete', [ProductController::class, 'deleteExport']);
+    Route::post('/products/sync-shop', [ProductController::class, 'syncShop']);
+
     // 订单管理
     Route::post('/orders/list', [OrderController::class, 'index']);
     Route::post('/orders/status-counts', [OrderController::class, 'statusCounts']);
@@ -152,6 +167,7 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     Route::post('/orders/fbs/handover-list/add-orders', [OrderLogisticsController::class, 'fbsAddLogisticOrdersToHandover']);
     Route::post('/orders/fbs/handover-list/remove-orders', [OrderLogisticsController::class, 'fbsRemoveLogisticOrdersFromHandover']);
     Route::post('/orders/fbs/handover-list/label', [OrderLogisticsController::class, 'fbsPrintHandoverList']);
+    Route::post('/orders/fbs/handover-list/set-big-bag-count', [OrderLogisticsController::class, 'fbsSetBigBagCount']);
     Route::post('/orders/fbs/handover-list/ready-for-pickup', [OrderLogisticsController::class, 'fbsReadyForPickup']);
     Route::post('/orders/fbs/handover-list/transfer', [OrderLogisticsController::class, 'fbsTransferHandoverList']);
 

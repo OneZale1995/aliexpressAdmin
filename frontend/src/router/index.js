@@ -170,6 +170,37 @@ export const asyncRoutes = [
         component: () => import('@/views/shop/index'),
         name: 'ShopManage',
         meta: { title: '店铺管理', icon: 'el-icon-s-shop' }
+      },
+      {
+        path: 'logistics-config',
+        component: () => import('@/views/shop/logistics-config'),
+        name: 'ShopLogisticsConfig',
+        meta: { title: '物流配置', icon: 'el-icon-setting' }
+      }
+    ]
+  },
+  {
+    path: '/product',
+    component: Layout,
+    redirect: '/product/list',
+    name: 'Product',
+    meta: {
+      title: '商品管理',
+      icon: 'el-icon-goods',
+      roles: ['super-admin']
+    },
+    children: [
+      {
+        path: 'list',
+        component: () => import('@/views/product/index'),
+        name: 'ProductListManage',
+        meta: { title: '商品列表', icon: 'el-icon-goods' }
+      },
+      {
+        path: 'export',
+        component: () => import('@/views/product/export'),
+        name: 'ProductExportManage',
+        meta: { title: '商品导出', icon: 'el-icon-download' }
       }
     ]
   },

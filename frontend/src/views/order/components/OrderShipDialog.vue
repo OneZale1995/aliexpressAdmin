@@ -184,9 +184,22 @@
           <span>交接状态：{{ getHandoverListStatusLabel(shipForm.handover_list_status) }}</span>
           <span v-if="shipForm.pickup_date">预约揽收：{{ shipForm.pickup_date }} {{ shipForm.pickup_time_from }} - {{ shipForm.pickup_time_to }}</span>
         </div>
-        <div class="panel-actions multi-actions">
+        <div class="panel-actions multi-actions" style="align-items:center;">
           <el-button @click="$emit('update-step', 3)">上一步</el-button>
-          <el-button :disabled="!shipForm.handover_list_id || isTransferCompleted" @click="$emit('mark-fbs-ready-for-pickup')">标记待揽收</el-button>
+          <!-- Pickup（上门揽收）专用：需先设置大袋数量再标记待揽收 -->
+          <template v-if="isPickupShipment">
+            <el-input-number
+              v-model="shipForm.big_bag_count"
+              :min="1"
+              :max="999"
+              :precision="0"
+              placeholder="大袋数量"
+              style="width:140px;"
+            />
+            <el-button :disabled="!shipForm.handover_list_id || !(shipForm.big_bag_count > 0)" @click="$emit('set-fbs-big-bag-count')">设置大袋数量</el-button>
+            <el-button :disabled="!shipForm.handover_list_id || isTransferCompleted" @click="$emit('mark-fbs-ready-for-pickup')">标记待揽收</el-button>
+          </template>
+          <!-- Dropoff（自寄）：直接关闭交接单 -->
           <el-button type="primary" :disabled="!canTransferHandover" @click="$emit('transfer-fbs-handover-list')">关闭交接单</el-button>
         </div>
       </div>
@@ -232,8 +245,15 @@ export default {
     isTransferCompleted() {
       return ['Transferred', 'Completed'].includes(this.shipForm.handover_list_status)
     },
+    isPickupShipment() {
+      return this.shipForm.handover_shipment_type === 'Pickup'
+    },
     canTransferHandover() {
       if (!this.shipForm.handover_list_id) return false
+      if (this.isTransferCompleted) return false
+      // Dropoff（自寄）：Created 状态即可关闭
+      if (!this.isPickupShipment) return true
+      // Pickup（上门揽收）：需要 Accepted/PartiallyAccepted/Sent
       return ['Accepted', 'PartiallyAccepted', 'Sent'].includes(this.shipForm.handover_list_status)
     }
   },

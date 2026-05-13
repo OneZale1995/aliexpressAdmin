@@ -51,7 +51,7 @@ class ProfileController extends Controller
         ]);
 
         $path = $request->file('avatar')->store('avatars/' . date('Ymd'), 'public');
-        $url = asset('storage/' . $path);
+        $url = Storage::disk('public')->url($path);
 
         $user = $request->user();
         $user->update(['avatar' => $url]);

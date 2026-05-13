@@ -8,6 +8,7 @@ use App\Models\DictType;
 use App\Models\Order;
 use App\Models\OrderSyncTask;
 use App\Models\Shop;
+use App\Models\SystemConfig;
 use App\Models\Team;
 use App\Traits\ApiResponse;
 use Carbon\Carbon;
@@ -17,6 +18,8 @@ use Illuminate\Support\Facades\DB;
 class OrderController extends Controller
 {
     use ApiResponse;
+
+    protected const ORDER_DISPLAY_STATUS_DICT_CODE = 'ae_order_display_status';
 
     protected const BACKEND_STATUS_DICT_CODE = 'order_backend_status';
 
@@ -464,22 +467,41 @@ class OrderController extends Controller
     public function syncStart(Request $request)
     {
         $user = $request->user();
+        $shopId = $request->input('shop_id');
+        $isSingleShop = !empty($shopId);
 
-        $existingTask = OrderSyncTask::query()
-            ->where('operator_user_id', $user->id)
-            ->whereIn('status', ['pending', 'running'])
-            ->orderByDesc('id')
-            ->first();
+        if (!$isSingleShop) {
+            // 批量同步：检查是否有未完成的任务
+            $existingTask = OrderSyncTask::query()
+                ->where('operator_user_id', $user->id)
+                ->whereIn('status', ['pending', 'running'])
+                ->orderByDesc('id')
+                ->first();
 
-        if ($existingTask) {
-            return $this->success([
-                'task_id' => $existingTask->id,
-                'status' => $existingTask->status,
-                'total_shops' => $existingTask->total_shops,
-            ], '已有同步任务正在执行，已返回当前任务');
+            if ($existingTask) {
+                $isStaleRunning = $existingTask->status === 'running'
+                    && $existingTask->updated_at->diffInHours(now()) >= 1;
+                $isStalePending = $existingTask->status === 'pending'
+                    && $existingTask->updated_at->diffInMinutes(now()) >= 10;
+
+                if ($isStaleRunning || $isStalePending) {
+                    $existingTask->update([
+                        'status' => 'completed',
+                        'progress' => $existingTask->progress,
+                        'finished_at' => now(),
+                        'message' => '同步完成（任务中断自动恢复）',
+                    ]);
+                } else {
+                    return $this->success([
+                        'task_id' => $existingTask->id,
+                        'status' => $existingTask->status,
+                        'total_shops' => $existingTask->total_shops,
+                    ], '已有同步任务正在执行，已返回当前任务');
+                }
+            }
         }
 
-        $shops = $this->getSyncableShops($user, $request->input('shop_id'));
+        $shops = $this->getSyncableShops($user, $shopId);
 
         if ($shops->isEmpty()) {
             return $this->error('没有可同步的店铺，请先配置店铺的access_token');
@@ -499,7 +521,7 @@ class OrderController extends Controller
         ]);
 
         try {
-            RunOrderSyncTask::dispatch($task->id);
+            RunOrderSyncTask::dispatch($task->id)->onQueue('orders');
         } catch (\Throwable $e) {
             $task->update([
                 'status' => 'failed',
@@ -641,7 +663,7 @@ class OrderController extends Controller
     public function export(Request $request)
     {
         $user = $request->user();
-        $query = Order::with(['shop:id,name,email', 'currentLogistics']);
+        $query = Order::with(['items', 'shop:id,name,email', 'currentLogistics']);
 
         if ($user->hasRole('super-admin')) {
             // no-op
@@ -675,32 +697,39 @@ class OrderController extends Controller
 
         $rows = $query->orderByDesc('id')->limit(10000)->get();
         $filename = 'orders_' . date('YmdHis') . '.csv';
+        $orderDisplayStatusLabelMap = $this->getDictLabelMap(self::ORDER_DISPLAY_STATUS_DICT_CODE);
+        $estimatedReceiptRate = $this->getEstimatedReceiptRate();
 
         $headers = [
-            '店铺', '店主邮箱', '平台单号', '订单状态', '买家', '收件人', '国际单号',
-            '物流模板', '物流费(最终)', '物流费(计算)', '人工覆盖',
-            '连连费', '采购额', '快递费', '下单时间', '后台备注',
+            '店铺', '店主邮箱', '平台单号', '订单状态', 'SKU编码', 'SKU属性', '数量', '买家', '收件人', '国际单号',
+            '物流模板', '销售额', '手续费', '回款', '预估回款', '采购', '物流费', '利润', '利润率', '下单时间', '后台备注',
         ];
 
         $csv = chr(0xEF) . chr(0xBB) . chr(0xBF);
         $csv .= implode(',', array_map(fn($h) => '"' . str_replace('"', '""', $h) . '"', $headers)) . "\n";
 
         foreach ($rows as $o) {
+            [$skuCodes, $skuSpecs, $skuQuantities] = $this->buildOrderExportSkuColumns($o);
             $line = [
                 $o->shop->name ?? '',
                 $o->shop->email ?? '',
                 $o->ae_order_id,
-                $o->order_display_status,
+                $this->translateByDictLabel($o->order_display_status, $orderDisplayStatusLabelMap),
+                $skuCodes,
+                $skuSpecs,
+                $skuQuantities,
                 $o->buyer_name,
                 $o->receiver_name,
                 $o->tracking_number,
                 $o->logistics_template,
-                $o->logistics_fee,
-                $o->calculated_logistics_fee,
-                $o->logistics_fee_override ? '是' : '否',
-                $o->lianlian_fee,
-                $o->purchase_amount,
-                $o->express_fee,
+                $this->formatMoney($o->total_amount),
+                $this->calcOrderFee($o),
+                $this->calcOrderReceipt($o),
+                $this->calcOrderEstimatedReceipt($o, $estimatedReceiptRate),
+                $this->formatMoney($o->purchase_amount),
+                $this->formatMoney($o->logistics_fee),
+                $this->calcOrderProfit($o),
+                $this->calcOrderProfitRate($o),
                 optional($o->ae_created_at)->format('Y-m-d H:i:s'),
                 $o->admin_remark,
             ];
@@ -711,6 +740,113 @@ class OrderController extends Controller
             'Content-Type' => 'text/csv; charset=UTF-8',
             'Content-Disposition' => 'attachment; filename="' . $filename . '"',
         ]);
+    }
+
+    private function buildOrderExportSkuColumns(Order $order): array
+    {
+        $items = collect($order->items ?? []);
+
+        $skuCodes = $items->map(function ($item) {
+            return trim((string) ($item->sku_code ?: $item->ae_sku_id ?: ''));
+        })->filter(fn($value) => $value !== '')->implode('； ');
+
+        $skuSpecs = $items->map(function ($item) {
+            return $this->buildOrderItemSpecText($item);
+        })->filter(fn($value) => $value !== '')->implode('； ');
+
+        $quantities = $items->map(function ($item) {
+            return (string) (int) ($item->quantity ?: 1);
+        })->implode('； ');
+
+        return [$skuCodes, $skuSpecs, $quantities];
+    }
+
+    private function getDictLabelMap(string $code): array
+    {
+        return collect(DictType::getItems($code))
+            ->mapWithKeys(function (array $item) {
+                return [(string) ($item['value'] ?? '') => (string) ($item['label'] ?? '')];
+            })
+            ->filter(fn($label, $value) => $value !== '' && $label !== '')
+            ->all();
+    }
+
+    private function translateByDictLabel($value, array $labelMap): string
+    {
+        if ($value === null || $value === '') {
+            return '';
+        }
+
+        $stringValue = (string) $value;
+        return $labelMap[$stringValue] ?? $stringValue;
+    }
+
+    private function buildOrderItemSpecText($item): string
+    {
+        $skuAttributes = is_array($item->sku_attributes) ? $item->sku_attributes : [];
+        if (!empty($skuAttributes)) {
+            return collect($skuAttributes)
+                ->filter(fn($value) => $value !== null && $value !== '')
+                ->map(fn($value, $key) => $key . ': ' . $value)
+                ->implode(' | ');
+        }
+
+        return '';
+    }
+
+    private function calcOrderProfit(Order $order): string
+    {
+        $profit = (float) $order->total_amount
+            - (float) $order->platform_fee
+            - (float) $order->affiliate_fee
+            - (float) $order->lianlian_fee
+            - (float) $order->purchase_amount
+            - (float) $order->logistics_fee;
+
+        return number_format($profit, 2, '.', '');
+    }
+
+    private function calcOrderFee(Order $order): string
+    {
+        $fee = (float) $order->platform_fee + (float) $order->affiliate_fee;
+
+        return number_format($fee, 2, '.', '');
+    }
+
+    private function calcOrderReceipt(Order $order): string
+    {
+        return $this->formatMoney($order->estimate_revenue);
+    }
+
+    private function calcOrderEstimatedReceipt(Order $order, float $estimatedReceiptRate): string
+    {
+        $amount = (float) $order->total_amount * $estimatedReceiptRate;
+
+        return number_format($amount, 2, '.', '');
+    }
+
+    private function calcOrderProfitRate(Order $order): string
+    {
+        $base = (float) $order->total_amount;
+        if ($base <= 0) {
+            return '0.00%';
+        }
+
+        $profit = (float) $this->calcOrderProfit($order);
+
+        return number_format(($profit / $base) * 100, 2, '.', '') . '%';
+    }
+
+    private function getEstimatedReceiptRate(): float
+    {
+        $configuredRate = (float) SystemConfig::getByKey('estimated_receipt_rate', 0.908);
+
+        return $configuredRate > 0 ? $configuredRate : 0.908;
+    }
+
+    private function formatMoney($value): string
+    {
+        return number_format((float) $value, 2, '.', '');
     }
 
     private function isTeamAdmin($user): bool

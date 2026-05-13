@@ -7,6 +7,7 @@ use App\Models\OrderSyncTask;
 use App\Models\Shop;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class OrderSyncTaskService
 {
@@ -73,27 +74,91 @@ class OrderSyncTaskService
             return $this->completeShopTask($taskId, $shopId, $shopName, 0, '店铺不存在', 'failed');
         }
 
+        if (!$shop->access_token) {
+            return $this->completeShopTask($taskId, $shopId, $shopName, 0, '未配置access_token', 'failed');
+        }
+
+        if ($shop->token_invalid_at) {
+            return $this->completeShopTask($taskId, $shopId, $shopName, 0, 'Token已失效（' . $shop->token_invalid_at . '），请重新授权', 'failed');
+        }
+
         $options = is_array($task->options) ? $task->options : [];
         $signature = $this->buildShopSyncSignature($shopId, $options);
         $runningKey = $this->shopRunningKey($signature);
 
-        if (!Cache::add($runningKey, now()->toDateTimeString(), now()->addSeconds(self::SHOP_RUNNING_TTL_SECONDS))) {
+        $cacheAvailable = true;
+        $lockAcquired = false;
+
+        try {
+            $lockAcquired = Cache::add($runningKey, now()->toDateTimeString(), now()->addSeconds(self::SHOP_RUNNING_TTL_SECONDS));
+        } catch (\Throwable $e) {
+            $cacheAvailable = false;
+            Log::warning('Redis cache unavailable during sync lock', [
+                'task_id' => $taskId,
+                'shop_id' => $shopId,
+                'message' => $e->getMessage(),
+            ]);
+        }
+
+        if ($cacheAvailable && !$lockAcquired) {
             return $this->completeShopTask($taskId, $shopId, $shopName, 0, '店铺正在同步，已跳过', 'skipped');
         }
 
         try {
-            if ($this->wasShopSyncedRecently($signature)) {
+            $recentlySynced = false;
+            if ($cacheAvailable) {
+                try {
+                    $recentlySynced = $this->wasShopSyncedRecently($signature);
+                } catch (\Throwable $e) {
+                    Log::warning('Redis cache unavailable during recent check', [
+                        'task_id' => $taskId,
+                        'shop_id' => $shopId,
+                        'message' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            if ($recentlySynced) {
                 return $this->completeShopTask($taskId, $shopId, $shopName, 0, '最近30分钟内已同步，已跳过', 'skipped');
             }
 
             $this->markShopRunning($taskId, $shopName);
 
             $shop->makeVisible('access_token');
-            $result = (new AliExpressService())->syncOrders($shop, $this->buildSyncParams($options));
+            $service = new AliExpressService();
+            $result = $service->syncOrders($shop, $this->buildSyncParams($options));
             $status = !empty($result['error']) ? 'failed' : 'completed';
 
             if ($status === 'completed') {
-                $this->markShopSyncedRecently($signature);
+                try {
+                    $this->markShopSyncedRecently($signature);
+                } catch (\Throwable $e) {
+                    Log::warning('Failed to mark shop synced recently', [
+                        'task_id' => $taskId,
+                        'shop_id' => $shopId,
+                        'message' => $e->getMessage(),
+                    ]);
+                }
+
+                // 同步完成后批量富化 SKU 属性
+                $orderIds = $result['order_ids'] ?? [];
+                if (!empty($orderIds)) {
+                    try {
+                        $enriched = $service->enrichOrdersSkuBatch($shop, $orderIds);
+                        Log::info('Order sync SKU batch enrichment done', [
+                            'task_id' => $taskId,
+                            'shop_id' => $shopId,
+                            'order_count' => count($orderIds),
+                            'enriched' => $enriched,
+                        ]);
+                    } catch (\Throwable $e) {
+                        Log::warning('Order sync SKU batch enrichment failed', [
+                            'task_id' => $taskId,
+                            'shop_id' => $shopId,
+                            'message' => $e->getMessage(),
+                        ]);
+                    }
+                }
             }
 
             return $this->completeShopTask(
@@ -107,7 +172,13 @@ class OrderSyncTaskService
         } catch (\Throwable $e) {
             return $this->completeShopTask($taskId, $shopId, $shopName, 0, $e->getMessage(), 'failed');
         } finally {
-            Cache::forget($runningKey);
+            if ($lockAcquired || !$cacheAvailable) {
+                try {
+                    Cache::forget($runningKey);
+                } catch (\Throwable $e) {
+                    // Redis unavailable; lock expires by TTL
+                }
+            }
         }
     }
 
@@ -195,8 +266,17 @@ class OrderSyncTaskService
             return $result;
         }
 
-        foreach ($shops as $shop) {
-            RunOrderSyncShopTask::dispatch($task->id, (int) $shop->id);
+        try {
+            foreach ($shops as $shop) {
+                RunOrderSyncShopTask::dispatch($task->id, (int) $shop->id)->onQueue('orders');
+            }
+        } catch (\Throwable $e) {
+            $this->markTaskFailed($task->id, '任务入队失败（Redis不可用）: ' . $e->getMessage());
+            return [
+                'success' => false,
+                'message' => '任务入队失败，请检查Redis状态',
+                'skipped' => false,
+            ];
         }
 
         return [

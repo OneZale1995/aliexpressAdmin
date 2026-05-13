@@ -9,18 +9,22 @@ use Illuminate\Console\Command;
 
 class EnrichSkuAttributes extends Command
 {
-    protected $signature = 'orders:enrich-sku {--limit=100}';
+    protected $signature = 'orders:enrich-sku {--limit=100} {--force}';
     protected $description = '补充订单商品的SKU变体属性（尺码、颜色等）';
 
     public function handle()
     {
         $limit = (int) $this->option('limit');
+        $force = (bool) $this->option('force');
 
-        $orders = Order::with(['items', 'shop'])
-            ->whereHas('items', fn($q) => $q->whereNull('sku_attributes'))
-            ->whereHas('shop', fn($q) => $q->whereNotNull('access_token'))
-            ->limit($limit)
-            ->get();
+        $query = Order::with(['items', 'shop'])
+            ->whereHas('shop', fn($q) => $q->whereNotNull('access_token'));
+
+        if (!$force) {
+            $query->whereHas('items', fn($q) => $q->whereNull('sku_attributes'));
+        }
+
+        $orders = $query->limit($limit)->get();
 
         $this->info("Found {$orders->count()} orders to enrich.");
 

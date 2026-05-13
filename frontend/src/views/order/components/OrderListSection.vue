@@ -324,22 +324,13 @@ export default {
     },
     getItemSpec(item) {
       const skuAttrs = item.sku_attributes || {}
-      const sizeKeys = ['size', 'color', 'colour', '颜色', '尺码', '尺寸', 'цвет', 'размер', 'покрой']
       if (Object.keys(skuAttrs).length) {
         const entries = Object.entries(skuAttrs)
-          .filter(([k, v]) => v && sizeKeys.some(sk => k.toLowerCase().includes(sk)))
+          .filter(([, v]) => v)
           .map(([k, v]) => k + ': ' + v)
         return entries.join(' | ')
       }
-      const props = item.properties || item.properties_map || {}
-      const specs = []
-      for (const [key, val] of Object.entries(props)) {
-        const k = key.toLowerCase()
-        if (sizeKeys.some(sk => k.includes(sk)) && val) {
-          specs.push(key + ': ' + val)
-        }
-      }
-      return specs.join(' | ')
+      return ''
     },
     getOrderItemCount(order) {
       return (order.items || []).reduce((sum, item) => sum + (item.quantity || 1), 0)

@@ -2,7 +2,7 @@
   <el-dialog title="同步订单" :visible.sync="dialogVisible" width="460px">
     <el-form label-width="100px">
       <el-form-item label="指定店铺">
-        <el-select v-model="syncForm.shop_id" placeholder="不选则同步所有店铺" clearable style="width: 100%;">
+        <el-select v-model="syncForm.shop_id" placeholder="不选则同步所有店铺" clearable filterable style="width: 100%;">
           <el-option v-for="shop in shopOptions" :key="shop.id" :label="shop.name" :value="shop.id" />
         </el-select>
       </el-form-item>

@@ -89,7 +89,7 @@ export default {
       list: [],
       activeGroup: 'site',
       groups: ['site', 'upload'],
-      groupLabels: { site: '网站设置', upload: '上传设置', finance: '财务设置', chinapost: '中国邮政' },
+      groupLabels: { site: '网站设置', upload: '上传设置', finance: '财务设置', chinapost: '中国邮政', logistics_plugin: '物流插件开关' },
       dialogVisible: false,
       dialogStatus: '',
       temp: { id: undefined, group: 'default', key: '', name: '', value: '', type: 'text', options: '', description: '', sort: 0 },

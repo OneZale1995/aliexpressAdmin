@@ -27,7 +27,7 @@
         <template slot="title"><i class="el-icon-search" /> 筛选搜索</template>
         <el-form :model="listQuery" inline class="filter-container" style="padding: 10px 0;">
           <el-form-item label="店铺">
-            <el-select v-model="listQuery.shop_id" placeholder="选择店铺" clearable style="width: 180px;">
+            <el-select v-model="listQuery.shop_id" placeholder="选择店铺" clearable filterable style="width: 180px;">
               <el-option v-for="shop in shopOptions" :key="shop.id" :label="shop.name" :value="shop.id" />
             </el-select>
           </el-form-item>

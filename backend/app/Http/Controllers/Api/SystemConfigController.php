@@ -30,6 +30,26 @@ class SystemConfigController extends Controller
             'description' => '用于计算预估回款，公式：销售额 × 比例',
             'sort' => 2,
         ],
+        [
+            'group' => 'logistics_plugin',
+            'key' => 'enable_team_logistics_config',
+            'name' => '启用团队物流配置',
+            'value' => '0',
+            'type' => 'switch',
+            'options' => '{"activeValue":"1","inactiveValue":"0"}',
+            'description' => '开启后允许团队配置中国邮政/雷翼账号参数',
+            'sort' => 1,
+        ],
+        [
+            'group' => 'logistics_plugin',
+            'key' => 'enable_user_logistics_config',
+            'name' => '启用用户物流配置',
+            'value' => '0',
+            'type' => 'switch',
+            'options' => '{"activeValue":"1","inactiveValue":"0"}',
+            'description' => '开启后允许采购用户配置个人物流参数，优先级高于团队',
+            'sort' => 2,
+        ],
     ];
 
     public function index(Request $request)

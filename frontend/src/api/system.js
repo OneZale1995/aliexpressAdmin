@@ -136,6 +136,14 @@ export function batchSaveConfig(configs) {
   return request({ url: '/system-configs/batch', method: 'post', data: { configs } })
 }
 
+export function fetchLogisticsConfigCurrent(data) {
+  return request({ url: '/logistics-configs/current', method: 'post', data })
+}
+
+export function saveLogisticsConfig(data) {
+  return request({ url: '/logistics-configs/save', method: 'post', data })
+}
+
 // ========== 数据字典 ==========
 export function fetchDictTypeList(data) {
   return request({ url: '/dict-types/list', method: 'post', data })

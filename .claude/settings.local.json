@@ -6,7 +6,27 @@
       "Bash(grep -n 'showError\\\\|$message\\\\.error' /d/developTools/phpstudy_pro/WWW/aliexpressAdmin/frontend/src/views/order/index.vue)",
       "Bash(grep:*)",
       "Bash(python3:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git *)",
+      "Bash(python *)",
+      "Bash(php *)",
+      "WebFetch(domain:business.aliexpress.ru)",
+      "WebSearch",
+      "mcp__ide__getDiagnostics",
+      "Bash(Get-ChildItem -Path \"D:\\\\developTools\\\\phpstudy_pro\\\\WWW\\\\aliexpressAdmin\\\\backend\" -Directory)",
+      "Bash(Select-Object Name)",
+      "PowerShell(Set-Location D:\\\\developTools\\\\phpstudy_pro\\\\WWW\\\\aliexpressAdmin\\\\backend; php artisan tinker --execute=\"$o = \\\\App\\\\Models\\\\Order::where\\('ae_order_id', '2604218952115416'\\)->first\\(\\); if\\($o\\) { $raw = $o->raw_data; echo 'ae_created_at in DB: ' . $o->ae_created_at . chr\\(10\\); echo 'raw created_at: ' . \\($raw['created_at'] ?? 'N/A'\\) . chr\\(10\\); echo 'raw paid_at: ' . \\($raw['paid_at'] ?? 'N/A'\\) . chr\\(10\\); } else { echo 'Order not found'; }\")",
+      "PowerShell(Set-Location D:\\\\developTools\\\\phpstudy_pro\\\\WWW\\\\aliexpressAdmin\\\\backend; php -r \"require 'vendor/autoload.php'; $app = require 'bootstrap/app.php'; $app->make\\('Illuminate\\\\Contracts\\\\Console\\\\Kernel'\\)->bootstrap\\(\\); $o = \\\\App\\\\Models\\\\Order::where\\('ae_order_id', '2604218952115416'\\)->first\\(\\); if\\($o\\) { $raw = $o->raw_data; echo 'ae_created_at in DB: ' . $o->ae_created_at . PHP_EOL; echo 'raw created_at: ' . \\($raw['created_at'] ?? 'N/A'\\) . PHP_EOL; echo 'raw paid_at: ' . \\($raw['paid_at'] ?? 'N/A'\\) . PHP_EOL; } else { echo 'Order not found' . PHP_EOL; }\")",
+      "Bash(del test_zh_locale.php)",
+      "Bash(del test_check_sku.php)",
+      "Bash(del test_locale.php)",
+      "Bash(npm run *)",
+      "PowerShell(git *)",
+      "Bash(Get-Content composer.json)",
+      "Bash(Select-Object -Index 46)"
     ]
   }
 }

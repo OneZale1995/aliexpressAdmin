@@ -773,6 +773,7 @@ export function applyCommentTempToOrder(order, commentTemp) {
     'shipping_date',
     'purchase_amount',
     'logistics_fee',
+    'weight',
     'apply_qianze_at',
     'ship_qianze_at'
   ].forEach(field => {

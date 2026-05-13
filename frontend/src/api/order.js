@@ -104,6 +104,10 @@ export function printFbsHandoverList(data) {
   return request({ url: '/orders/fbs/handover-list/label', method: 'post', data })
 }
 
+export function setFbsHandoverBigBagCount(data) {
+  return request({ url: '/orders/fbs/handover-list/set-big-bag-count', method: 'post', data })
+}
+
 export function readyFbsHandoverForPickup(data) {
   return request({ url: '/orders/fbs/handover-list/ready-for-pickup', method: 'post', data })
 }
@@ -113,7 +117,7 @@ export function transferFbsHandoverList(data) {
 }
 
 export function exportOrders(data) {
-  return request({ url: '/orders/export', method: 'post', data, responseType: 'blob' })
+  return request({ url: '/orders/export', method: 'post', data, responseType: 'blob', timeout: 0 })
 }
 
 export function chinaPostPreviewOrder(data) {

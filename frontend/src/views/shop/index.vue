@@ -19,6 +19,12 @@
           <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{ row.status === 1 ? '正常' : '禁用' }}</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="Token" align="center" width="100">
+        <template slot-scope="{row}">
+          <el-tag v-if="row.token_invalid_at" type="danger" size="small">已失效</el-tag>
+          <el-tag v-else type="success" size="small">正常</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="订单更新" align="center" width="200">
         <template slot-scope="{row}">
           <div>
@@ -80,7 +86,7 @@
             <el-option v-for="t in teamOptions" :key="t.id" :label="t.name" :value="t.id" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="isSuperAdmin || isTeamAdmin" label="所属采购">
+        <el-form-item v-if="isSuperAdmin || isTeamAdmin" label="所属采购" prop="user_id">
           <el-select v-model="temp.user_id" filterable placeholder="请选择采购人员" style="width: 100%;">
             <el-option v-for="u in memberOptions" :key="u.id" :label="u.nickname || u.username" :value="u.id" />
           </el-select>
@@ -161,6 +167,9 @@ export default {
       const r = { name: this.rules.name }
       if (this.isSuperAdmin) {
         r.team_id = [{ required: true, message: '请选择所属团队', trigger: 'change' }]
+      }
+      if (this.isSuperAdmin || this.isTeamAdmin) {
+        r.user_id = [{ required: true, message: '请选择所属采购', trigger: 'change' }]
       }
       return r
     }

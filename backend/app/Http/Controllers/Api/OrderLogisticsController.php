@@ -614,7 +614,7 @@ class OrderLogisticsController extends Controller
         ]);
 
         $order = Order::with(['shop', 'items', 'currentLogistics'])->findOrFail($request->id);
-        $service = new ChinaPostService();
+        $service = new ChinaPostService($order);
         $result = $service->previewCreateOrderRequest(
             $order,
             $this->normalizeChinaPostOrderOptions($order, $request->except(['id']))
@@ -711,7 +711,7 @@ class OrderLogisticsController extends Controller
             return $this->error('该订单暂无运单号，请先创建邮政订单');
         }
 
-        $service = new ChinaPostService();
+        $service = new ChinaPostService($order);
         $result = $service->getLabel(
             $order->tracking_number,
             $request->input('page_type', 'RM')
@@ -750,7 +750,7 @@ class OrderLogisticsController extends Controller
             return $this->error('该订单暂无运单号');
         }
 
-        $service = new ChinaPostService();
+        $service = new ChinaPostService($order);
         $result = $service->cancelOrder($order->tracking_number);
 
         if ($result['success']) {
@@ -823,7 +823,12 @@ class OrderLogisticsController extends Controller
      */
     public function sz56tProducts(Request $request)
     {
-        $service = new Sz56tService();
+        $order = null;
+        if ($request->filled('id')) {
+            $order = Order::with(['shop'])->find((int) $request->id);
+        }
+
+        $service = new Sz56tService($order);
         $result = $service->getProductList($request->boolean('refresh'));
 
         if (!$result['success']) {
@@ -877,7 +882,7 @@ class OrderLogisticsController extends Controller
             ?: data_get($logistics, 'payload.sz56t.order_id')
             ?: ''
         );
-        $service = new Sz56tService();
+        $service = new Sz56tService($order);
 
         $this->thirdPartyLog()->info('Sz56t getLabel request', [
             'order_id' => $order->ae_order_id,
@@ -955,7 +960,7 @@ class OrderLogisticsController extends Controller
         $order = Order::with('currentLogistics')->findOrFail($request->id);
 
         $invoiceCode = $this->resolveSz56tCustomerInvoiceCode($order);
-        $service = new Sz56tService();
+        $service = new Sz56tService($order);
         $result = $service->markShipped($invoiceCode);
 
         if ($result['success']) {
@@ -995,7 +1000,7 @@ class OrderLogisticsController extends Controller
 
         $order = Order::findOrFail($request->id);
 
-        $service = new Sz56tService();
+        $service = new Sz56tService($order);
         $result = $service->getTrackingNumber((string) $order->ae_order_id, $order->sz56t_order_id ? (string) $order->sz56t_order_id : null);
 
         if ($result['success'] && !empty($result['tracking_number'])) {
@@ -1040,7 +1045,7 @@ class OrderLogisticsController extends Controller
         $customerId = (string) (data_get($logistics, 'payload.sz56t.customer_id') ?: '');
         $reason = $request->input('reason', 'manual cancel');
 
-        $service = new Sz56tService();
+        $service = new Sz56tService($order);
         $result = $service->cancelOrder($orderId, $customerId, $reason);
 
         if (!$result['success']) {
@@ -1328,6 +1333,32 @@ class OrderLogisticsController extends Controller
         }
 
         return $this->error($result['message'] ?? '交接清单标签获取失败');
+    }
+
+    public function fbsSetBigBagCount(Request $request)
+    {
+        $request->validate([
+            'id'              => 'required|exists:orders,id',
+            'big_bag_count'   => 'required|integer|min:1',
+            'handover_list_id' => 'nullable|integer|min:1',
+        ]);
+
+        $order = Order::with(['shop', 'currentLogistics'])->findOrFail($request->id);
+        if ($response = $this->ensureOrderHasShop($order)) {
+            return $response;
+        }
+
+        $result = $this->fbsWorkflowService()->setBigBagCount(
+            $order,
+            (int) $request->big_bag_count,
+            (int) $request->input('handover_list_id', 0) ?: null
+        );
+
+        if (!$result['success']) {
+            return $this->error($result['message'] ?? '设置大袋数量失败');
+        }
+
+        return $this->success($result['data'] ?? [], $result['message'] ?? '大袋数量已设置');
     }
 
     public function fbsReadyForPickup(Request $request)
@@ -1918,7 +1949,7 @@ class OrderLogisticsController extends Controller
 
     private function createChinaPostOrder(Order $order, array $options = []): array
     {
-        $service = new ChinaPostService();
+        $service = new ChinaPostService($order);
         $options = $this->normalizeChinaPostOrderOptions($order, $options);
 
         $result = $service->createOrder($order, $options);
@@ -1967,7 +1998,7 @@ class OrderLogisticsController extends Controller
 
     private function allocateChinaPostBarcode(Order $order, array $options = []): array
     {
-        $service = new ChinaPostService();
+        $service = new ChinaPostService($order);
         $result = $service->allocateBarcode($order, $options);
 
         if (!$result['success']) {
@@ -2016,7 +2047,7 @@ class OrderLogisticsController extends Controller
         $serviceForm = $this->normalizeSz56tFormForService(is_array($options['form'] ?? null) ? $options['form'] : []);
         $invoiceItems = $this->normalizeSz56tInvoiceItems(is_array($options['invoice_items'] ?? null) ? $options['invoice_items'] : []);
 
-        $service = new Sz56tService();
+        $service = new Sz56tService($order);
         $result = $service->createOrder($order, [
             'product_id' => $options['product_id'] ?? null,
             'weight' => $weightInKg,

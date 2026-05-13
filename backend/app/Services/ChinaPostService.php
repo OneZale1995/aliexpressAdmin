@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Order;
+use App\Services\LogisticsConfigResolver;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use App\Models\SystemConfig;
@@ -23,10 +24,15 @@ class ChinaPostService
     // 默认寄件人信息
     protected array $defaultSender;
 
-    public function __construct()
+    public function __construct(?Order $order = null)
     {
         $config = config('services.chinapost', []);
         $sys = SystemConfig::getByGroup('chinapost');
+        $resolver = new LogisticsConfigResolver();
+        $resolved = $resolver->resolveForOrder($order, LogisticsConfigResolver::PROVIDER_CHINAPOST);
+        $scopeConfig = is_array($resolved['config'] ?? null) ? $resolved['config'] : [];
+
+        $sys = $this->mergeScopeConfigToSystemConfig($sys, $scopeConfig);
 
         $isProduction = ($sys['env'] ?? 'test') === 'production';
         $envPrefix = $isProduction ? 'prod_' : 'test_';
@@ -98,6 +104,34 @@ class ChinaPostService
             'gis' => '',
             'linker' => '',
         ];
+    }
+
+    private function mergeScopeConfigToSystemConfig(array $systemConfig, array $scopeConfig): array
+    {
+        $map = [
+            'test_authorization' => 'test_authorization',
+            'test_digest_key' => 'test_digest_key',
+            'prod_authorization' => 'prod_authorization',
+            'prod_digest_key' => 'prod_digest_key',
+            'agreement_code' => 'agreement_code',
+            'pickup_org_code' => 'pickup_org_code',
+            'label_ak' => 'label_ak',
+        ];
+
+        foreach ($map as $sourceKey => $targetKey) {
+            if (!array_key_exists($sourceKey, $scopeConfig)) {
+                continue;
+            }
+
+            $value = is_string($scopeConfig[$sourceKey]) ? trim($scopeConfig[$sourceKey]) : $scopeConfig[$sourceKey];
+            if ($value === null || $value === '') {
+                continue;
+            }
+
+            $systemConfig[$targetKey] = (string) $value;
+        }
+
+        return $systemConfig;
     }
 
     protected function thirdPartyLog()

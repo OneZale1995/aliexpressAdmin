@@ -11,7 +11,7 @@ class Shop extends Model
 
     protected $table = 'shops';
     protected $fillable = [
-        'name', 'email', 'status', 'access_token',
+        'name', 'email', 'status', 'access_token', 'token_invalid_at',
         'default_shipping_fee', 'logistics_template_id',
         'logistics_template_name', 'logistics_route',
         'order_updated_at', 'user_id', 'team_id',

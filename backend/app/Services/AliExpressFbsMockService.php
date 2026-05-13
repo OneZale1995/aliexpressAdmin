@@ -318,6 +318,24 @@ class AliExpressFbsMockService
         ];
     }
 
+    public function setBigBagCount(Order $order, int $handoverListId, int $bigBagCount): array
+    {
+        $state = $this->getState($order);
+        $handoverList = $state['handover_list'] ?? null;
+        if (!$handoverList || (int) ($handoverList['id'] ?? 0) !== $handoverListId) {
+            return ['success' => false, 'message' => '缺少 handover_list_id'];
+        }
+
+        $handoverList['big_bag_count'] = $bigBagCount;
+        $this->persistState($order, array_merge($state, ['handover_list' => $handoverList]));
+
+        return [
+            'success' => true,
+            'message' => "大袋数量已设置为 {$bigBagCount}（Mock）",
+            'data' => ['big_bag_count' => $bigBagCount],
+        ];
+    }
+
     public function transferHandoverList(Order $order, int $handoverListId): array
     {
         $state = $this->getState($order);

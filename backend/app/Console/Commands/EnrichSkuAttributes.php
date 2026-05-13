@@ -2,8 +2,8 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\RunShopProductDetailSyncJob;
 use App\Models\Order;
-use App\Models\OrderItem;
 use App\Models\Product;
 use App\Services\AliExpressService;
 use Illuminate\Console\Command;
@@ -30,68 +30,45 @@ class EnrichSkuAttributes extends Command
 
         $this->info("Found {$total} orders to enrich.");
 
-        // 收集所有商品ID，预同步缺失的产品数据
         $service = new AliExpressService();
-        $productIds = collect();
+
+        // 收集所有商品ID → 缺失的dispatch到队列并行同步
+        $productMap = []; // [product_id => ['shop' => Shop, 'shop_id' => int]]
         foreach ($orders as $order) {
             if (!$order->shop) continue;
             foreach ($order->items as $item) {
-                if ($item->ae_item_id) {
-                    $productIds->push([
-                        'shop_id' => $order->shop->id,
-                        'shop' => $order->shop,
-                        'product_id' => (string) $item->ae_item_id,
-                    ]);
+                if ($item->ae_item_id && !isset($productMap[$item->ae_item_id])) {
+                    $productMap[$item->ae_item_id] = ['shop' => $order->shop, 'shop_id' => $order->shop->id];
                 }
             }
         }
 
-        $uniqueProductIds = $productIds->unique('product_id')->values();
-        $this->info("Unique products across orders: {$uniqueProductIds->count()}");
+        $this->info('Unique products: ' . count($productMap));
 
-        $missingIds = [];
-        foreach ($uniqueProductIds as $p) {
-            $exists = Product::where('shop_id', $p['shop_id'])
-                ->where('ae_item_id', $p['product_id'])
+        $dispatched = 0;
+        $existingIds = [];
+        foreach ($productMap as $productId => $info) {
+            $exists = Product::where('shop_id', $info['shop_id'])
+                ->where('ae_item_id', $productId)
                 ->whereNotNull('skus')
                 ->exists();
-            if (!$exists) {
-                $missingIds[] = $p;
+            if ($exists) {
+                $existingIds[] = $productId;
+            } else {
+                RunShopProductDetailSyncJob::dispatch($info['shop_id'], $productId)->onQueue('products');
+                $dispatched++;
             }
         }
 
-        if (count($missingIds) > 0) {
-            // 按店铺分组，每批10个并发请求
-            $byShop = [];
-            foreach ($missingIds as $p) {
-                $byShop[$p['shop_id']][] = $p;
-            }
-
-            $this->info('Pre-fetching ' . count($missingIds) . ' missing products (10 concurrent)...');
-            $syncBar = $this->output->createProgressBar(count($missingIds));
-            $syncBar->setFormat(" %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s%  %message%");
-
-            foreach ($byShop as $shopId => $products) {
-                $shop = $products[0]['shop'];
-                $pids = array_column($products, 'product_id');
-                $synced = 0;
-
-                foreach (array_chunk($pids, 10) as $chunk) {
-                    $syncBar->setMessage("Shop #{$shopId} (" . count($chunk) . ' concurrent)');
-                    $service->batchGetProductDetails($shop, $chunk, 10);
-                    $syncBar->advance(count($chunk));
-                }
-            }
-            $syncBar->finish();
-            $this->line('');
+        if ($dispatched > 0) {
+            $this->info("Dispatched {$dispatched} product sync jobs to queue. Workers will enrich related orders on completion.");
         }
 
-        // 批量预同步类目数据（每批20个，大幅减少API调用）
-        $allProductIds = $uniqueProductIds->pluck('product_id')->unique()->values()->toArray();
-        if (!empty($allProductIds)) {
+        // 批量预同步类目（每批20个，已有的跳过）
+        if (!empty($existingIds)) {
             $firstShop = $orders->first()->shop ?? null;
             if ($firstShop && $firstShop->access_token) {
-                $categoryIds = Product::whereIn('ae_item_id', $allProductIds)
+                $categoryIds = Product::whereIn('ae_item_id', $existingIds)
                     ->whereNotNull('category_id')
                     ->where('category_id', '!=', '')
                     ->pluck('category_id')
@@ -107,7 +84,7 @@ class EnrichSkuAttributes extends Command
             }
         }
 
-        $this->info('Enriching SKU attributes...');
+        $this->info('Enriching SKU attributes (items with local product data)...');
         $bar = $this->output->createProgressBar($total);
         $bar->setFormat(" %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s%  %message%");
 
@@ -132,7 +109,11 @@ class EnrichSkuAttributes extends Command
         $this->line('');
 
         $elapsed = round(microtime(true) - $startTime, 1);
-        $this->info("Done. {$total} orders processed, {$totalEnriched} items enriched in {$elapsed}s.");
+        $this->info("Done. {$total} orders processed, {$totalEnriched} items enriched now in {$elapsed}s.");
+
+        if ($dispatched > 0) {
+            $this->info("{$dispatched} products syncing via queue — run this command again after workers finish for full coverage.");
+        }
 
         return 0;
     }

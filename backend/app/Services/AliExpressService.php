@@ -1507,61 +1507,6 @@ class AliExpressService
         }
     }
 
-    public function batchGetProductDetails(Shop $shop, array $productIds, int $concurrency = 10): array
-    {
-        $token = $shop->access_token;
-        if (!$token) {
-            return [];
-        }
-
-        $results = [];
-        $chunks = array_chunk($productIds, $concurrency);
-
-        foreach ($chunks as $chunk) {
-            $pool = Http::pool();
-
-            $pending = [];
-            foreach ($chunk as $productId) {
-                $pending[$productId] = $pool->withHeaders([
-                    'x-auth-token' => $token,
-                    'Content-Type' => 'application/json',
-                ])
-                    ->withOptions(['verify' => $this->verifySsl])
-                    ->connectTimeout(5)
-                    ->timeout(12)
-                    ->post($this->baseUrl . '/api/v1/product/get-seller-product', [
-                        'product_id' => $productId,
-                    ]);
-            }
-
-            foreach ($pending as $productId => $response) {
-                try {
-                    $data = $response->json();
-                    if (!$response->successful() || isset($data['error'])) {
-                        $errorMsg = $data['error']['message'] ?? '';
-                        if ($response->status() === 401 || str_contains($errorMsg, 'GetTokenByID') || str_contains($errorMsg, 'cannot GetToken')) {
-                            $shop->update(['token_invalid_at' => now()]);
-                        }
-                        continue;
-                    }
-
-                    $detail = $data['data'] ?? null;
-                    if (is_array($detail)) {
-                        $this->upsertProduct($shop, $detail, true);
-                        $results[$productId] = $detail;
-                    }
-                } catch (\Throwable $e) {
-                    $this->thirdPartyLog()->warning('AliExpress batchGetProductDetail failed', [
-                        'product_id' => $productId,
-                        'message' => $e->getMessage(),
-                    ]);
-                }
-            }
-        }
-
-        return $results;
-    }
-
     public function syncShopProductPage(Shop $shop, ?string $lastId = null, int $limit = 50): array
     {
         $token = $shop->access_token;

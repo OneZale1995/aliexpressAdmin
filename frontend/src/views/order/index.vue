@@ -57,7 +57,6 @@
       :backend-status-options="backendStatusOptions"
       :upload-url="uploadUrl"
       :upload-headers="uploadHeaders"
-      @image-upload-success="handleImageUploadSuccess"
       @save="submitComment"
     />
 

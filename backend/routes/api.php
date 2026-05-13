@@ -149,6 +149,7 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     Route::post('/orders/sync-progress', [OrderController::class, 'syncProgress']);
     Route::post('/orders/update-comment', [OrderController::class, 'updateComment']);
     Route::post('/orders/update-backend-fields', [OrderController::class, 'updateBackendFields']);
+    Route::post('/orders/delete-image', [OrderController::class, 'deleteImage']);
     Route::post('/orders/batch-update-backend-status', [OrderController::class, 'batchUpdateBackendStatus']);
     Route::post('/orders/enrich-sku-attributes', [OrderController::class, 'enrichSkuAttributes']);
     Route::post('/orders/export', [OrderController::class, 'export']);

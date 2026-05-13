@@ -31,34 +31,42 @@
         <el-col :span="12">
           <el-form-item label="物流费">
             <el-input v-model.number="commentTemp.logistics_fee" type="number" min="0" />
-            <span class="text-muted" style="font-size:11px;">公式: 重量×35+15，可手动修改</span>
+            <span class="text-muted" style="font-size:11px;">公式: 重量x35+15，可手动修改</span>
           </el-form-item>
         </el-col>
       </el-row>
       <el-form-item label="采购图片">
-        <el-upload
-          :action="uploadUrl"
-          :headers="uploadHeaders"
-          :show-file-list="false"
-          :on-success="handlePurchaseImageUploadSuccess"
-        >
-          <el-button size="small" type="primary">上传采购图片</el-button>
-        </el-upload>
-        <div v-if="commentTemp.purchase_image" style="margin-top: 8px;">
-          <el-image :src="commentTemp.purchase_image" :preview-src-list="[commentTemp.purchase_image]" style="width: 100px; height: 100px; border: 1px solid #eee;" fit="cover" />
+        <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start;">
+          <div v-for="(url, index) in purchaseImages" :key="index" class="image-item">
+            <el-image :src="url" :preview-src-list="purchaseImages" style="width: 100px; height: 100px; border: 1px solid #eee;" fit="cover" />
+            <i class="el-icon-close image-delete" @click="deleteImage('purchase_image', url)" />
+          </div>
+          <el-upload
+            :action="uploadUrl"
+            :headers="uploadHeaders"
+            :show-file-list="false"
+            :on-success="handlePurchaseUploadSuccess"
+            style="display: inline-block;"
+          >
+            <div class="upload-trigger"><i class="el-icon-plus" /></div>
+          </el-upload>
         </div>
       </el-form-item>
       <el-form-item label="发货图片">
-        <el-upload
-          :action="uploadUrl"
-          :headers="uploadHeaders"
-          :show-file-list="false"
-          :on-success="handleShippingImageUploadSuccess"
-        >
-          <el-button size="small" type="success">上传发货图片</el-button>
-        </el-upload>
-        <div v-if="commentTemp.shipping_image" style="margin-top: 8px;">
-          <el-image :src="commentTemp.shipping_image" :preview-src-list="[commentTemp.shipping_image]" style="width: 100px; height: 100px; border: 1px solid #eee;" fit="cover" />
+        <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start;">
+          <div v-for="(url, index) in shippingImages" :key="index" class="image-item">
+            <el-image :src="url" :preview-src-list="shippingImages" style="width: 100px; height: 100px; border: 1px solid #eee;" fit="cover" />
+            <i class="el-icon-close image-delete" @click="deleteImage('shipping_image', url)" />
+          </div>
+          <el-upload
+            :action="uploadUrl"
+            :headers="uploadHeaders"
+            :show-file-list="false"
+            :on-success="handleShippingUploadSuccess"
+            style="display: inline-block;"
+          >
+            <div class="upload-trigger"><i class="el-icon-plus" /></div>
+          </el-upload>
         </div>
       </el-form-item>
     </el-form>
@@ -70,46 +78,44 @@
 </template>
 
 <script>
+import { deleteOrderImage } from '@/api/order'
+
+function ensureArray(val) {
+  if (Array.isArray(val)) return val
+  if (typeof val === 'string' && val) {
+    try { const d = JSON.parse(val); if (Array.isArray(d)) return d } catch (_) { /* ignore */ }
+    return [val]
+  }
+  return []
+}
+
 export default {
   name: 'OrderCommentDialog',
   props: {
-    visible: {
-      type: Boolean,
-      default: false
-    },
-    commentTemp: {
-      type: Object,
-      required: true
-    },
-    backendStatusOptions: {
-      type: Array,
-      default: () => []
-    },
-    uploadUrl: {
-      type: String,
-      required: true
-    },
-    uploadHeaders: {
-      type: Object,
-      default: () => ({})
-    }
+    visible: { type: Boolean, default: false },
+    commentTemp: { type: Object, required: true },
+    backendStatusOptions: { type: Array, default: () => [] },
+    uploadUrl: { type: String, required: true },
+    uploadHeaders: { type: Object, default: () => ({}) }
   },
   data() {
-    return {}
+    return {
+      purchaseImages: [],
+      shippingImages: []
+    }
   },
   computed: {
     dialogVisible: {
-      get() {
-        return this.visible
-      },
-      set(value) {
-        this.$emit('update:visible', value)
-      }
+      get() { return this.visible },
+      set(value) { this.$emit('update:visible', value) }
     }
   },
   watch: {
     visible(v) {
-      if (!v) return
+      if (v) {
+        this.purchaseImages = ensureArray(this.commentTemp.purchase_image)
+        this.shippingImages = ensureArray(this.commentTemp.shipping_image)
+      }
     }
   },
   methods: {
@@ -119,15 +125,69 @@ export default {
         this.commentTemp.logistics_fee = Number((w * 35 + 15).toFixed(2))
       }
     },
-    handlePurchaseImageUploadSuccess(response) {
-      this.$emit('image-upload-success', response, 'purchase_image')
+    handlePurchaseUploadSuccess(response) {
+      const url = (response && response.data && response.data.url) || (response && response.url) || ''
+      if (url) {
+        this.purchaseImages.push(url)
+        this.syncToTemp()
+      }
     },
-    handleShippingImageUploadSuccess(response) {
-      this.$emit('image-upload-success', response, 'shipping_image')
+    handleShippingUploadSuccess(response) {
+      const url = (response && response.data && response.data.url) || (response && response.url) || ''
+      if (url) {
+        this.shippingImages.push(url)
+        this.syncToTemp()
+      }
+    },
+    syncToTemp() {
+      this.commentTemp.purchase_image = this.purchaseImages.length ? [...this.purchaseImages] : null
+      this.commentTemp.shipping_image = this.shippingImages.length ? [...this.shippingImages] : null
+    },
+    deleteImage(field, url) {
+      const images = field === 'purchase_image' ? this.purchaseImages : this.shippingImages
+      const idx = images.indexOf(url)
+      if (idx > -1) images.splice(idx, 1)
+
+      deleteOrderImage({ id: this.commentTemp.id, type: field, url }).catch(() => {})
+      this.syncToTemp()
     }
   }
 }
 </script>
 
 <style scoped>
+.image-item {
+  position: relative;
+  display: inline-block;
+}
+.image-delete {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  background: #f56c6c;
+  color: #fff;
+  border-radius: 50%;
+  font-size: 12px;
+  cursor: pointer;
+}
+.upload-trigger {
+  width: 100px;
+  height: 100px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #999;
+  font-size: 28px;
+}
+.upload-trigger:hover {
+  border-color: #409EFF;
+  color: #409EFF;
+}
 </style>

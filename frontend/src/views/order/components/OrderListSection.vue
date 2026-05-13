@@ -120,23 +120,35 @@
             <div class="meta-line"><span class="label">发货日期</span>{{ order.shipping_date || '-' }}</div>
             <div class="meta-line"><span class="label">后台备注</span><span class="clip-text">{{ order.admin_remark || '-' }}</span></div>
             <div class="meta-line image-line"><span class="label">采购图片</span>
-              <el-image
-                v-if="order.purchase_image"
-                :src="order.purchase_image"
-                :preview-src-list="[order.purchase_image]"
-                class="backend-thumb"
-                fit="cover"
-              />
+              <template v-if="flatImageUrls(order.purchase_image).length">
+                <span class="backend-thumbs">
+                  <el-image
+                    v-for="(url, idx) in flatImageUrls(order.purchase_image).slice(0, 3)"
+                    :key="idx"
+                    :src="url"
+                    :preview-src-list="flatImageUrls(order.purchase_image)"
+                    class="backend-thumb"
+                    fit="cover"
+                  />
+                  <span v-if="flatImageUrls(order.purchase_image).length > 3" class="image-count">+{{ flatImageUrls(order.purchase_image).length - 3 }}</span>
+                </span>
+              </template>
               <span v-else>-</span>
             </div>
-            <div class="meta-line image-line"><span class="label">上传图片</span>
-              <el-image
-                v-if="order.shipping_image"
-                :src="order.shipping_image"
-                :preview-src-list="[order.shipping_image]"
-                class="backend-thumb"
-                fit="cover"
-              />
+            <div class="meta-line image-line"><span class="label">发货图片</span>
+              <template v-if="flatImageUrls(order.shipping_image).length">
+                <span class="backend-thumbs">
+                  <el-image
+                    v-for="(url, idx) in flatImageUrls(order.shipping_image).slice(0, 3)"
+                    :key="idx"
+                    :src="url"
+                    :preview-src-list="flatImageUrls(order.shipping_image)"
+                    class="backend-thumb"
+                    fit="cover"
+                  />
+                  <span v-if="flatImageUrls(order.shipping_image).length > 3" class="image-count">+{{ flatImageUrls(order.shipping_image).length - 3 }}</span>
+                </span>
+              </template>
               <span v-else>-</span>
             </div>
           </div>
@@ -334,6 +346,14 @@ export default {
     },
     getOrderItemCount(order) {
       return (order.items || []).reduce((sum, item) => sum + (item.quantity || 1), 0)
+    },
+    flatImageUrls(val) {
+      if (Array.isArray(val)) return val
+      if (typeof val === 'string' && val) {
+        try { const d = JSON.parse(val); if (Array.isArray(d)) return d } catch (_) { /* ignore */ }
+        return [val]
+      }
+      return []
     },
     getOrderIssueStatus(order) {
       const items = order.items || []
@@ -559,10 +579,31 @@ export default {
 }
 
 .backend-thumb {
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   border: 1px solid #ebeef5;
   border-radius: 4px;
+}
+
+.backend-thumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.image-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  background: #409eff;
+  color: #fff;
+  border-radius: 11px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 5px;
 }
 
 .strong {

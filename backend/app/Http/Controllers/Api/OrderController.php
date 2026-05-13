@@ -95,19 +95,19 @@ class OrderController extends Controller
         }
         if ($request->filled('has_purchase_image')) {
             if ((string) $request->has_purchase_image === '1') {
-                $query->whereNotNull('purchase_image')->where('purchase_image', '!=', '');
+                $query->whereNotNull('purchase_image')->whereRaw('JSON_LENGTH(purchase_image) > 0');
             } else {
                 $query->where(function ($q) {
-                    $q->whereNull('purchase_image')->orWhere('purchase_image', '');
+                    $q->whereNull('purchase_image')->orWhereRaw('JSON_LENGTH(purchase_image) = 0');
                 });
             }
         }
         if ($request->filled('has_shipping_image')) {
             if ((string) $request->has_shipping_image === '1') {
-                $query->whereNotNull('shipping_image')->where('shipping_image', '!=', '');
+                $query->whereNotNull('shipping_image')->whereRaw('JSON_LENGTH(shipping_image) > 0');
             } else {
                 $query->where(function ($q) {
-                    $q->whereNull('shipping_image')->orWhere('shipping_image', '');
+                    $q->whereNull('shipping_image')->orWhereRaw('JSON_LENGTH(shipping_image) = 0');
                 });
             }
         }
@@ -584,8 +584,8 @@ class OrderController extends Controller
             'seller_comment' => 'nullable|string|max:1000',
             'admin_remark' => 'nullable|string|max:2000',
             'backend_status' => 'nullable|string|max:50',
-            'purchase_image' => 'nullable|string|max:500',
-            'shipping_image' => 'nullable|string|max:500',
+            'purchase_image' => 'nullable',
+            'shipping_image' => 'nullable',
             'purchase_date' => 'nullable|date',
             'shipping_date' => 'nullable|date',
             'purchase_amount' => 'nullable|numeric|min:0',
@@ -601,8 +601,8 @@ class OrderController extends Controller
             'seller_comment' => $request->input('seller_comment', $order->seller_comment),
             'admin_remark' => $request->input('admin_remark', $order->admin_remark),
             'backend_status' => $request->input('backend_status') ?: '',
-            'purchase_image' => $request->input('purchase_image', $order->purchase_image),
-            'shipping_image' => $request->input('shipping_image', $order->shipping_image),
+            'purchase_image' => $this->normalizeImagePayload($request, 'purchase_image', $order),
+            'shipping_image' => $this->normalizeImagePayload($request, 'shipping_image', $order),
             'purchase_date' => $request->input('purchase_date', $order->purchase_date),
             'shipping_date' => $request->input('shipping_date', $order->shipping_date),
             'purchase_amount' => $request->input('purchase_amount', $order->purchase_amount),
@@ -617,6 +617,61 @@ class OrderController extends Controller
         $order->load('currentLogistics');
 
         return $this->success($order, '订单后台信息更新成功');
+    }
+
+    public function deleteImage(Request $request)
+    {
+        $request->validate([
+            'id' => 'required|exists:orders,id',
+            'url' => 'required|string',
+            'type' => 'required|in:purchase_image,shipping_image',
+        ]);
+
+        $order = Order::findOrFail($request->id);
+        $field = $request->type;
+        $existing = $order->$field;
+        $images = is_array($existing) ? $existing : [];
+
+        $urlToDelete = $request->url;
+        $images = array_values(array_filter($images, fn($url) => $url !== $urlToDelete));
+
+        $order->update([$field => empty($images) ? null : $images]);
+
+        // 尝试删除服务器上的文件
+        $path = parse_url($urlToDelete, PHP_URL_PATH);
+        if ($path) {
+            $storagePath = ltrim(preg_replace('#^/storage/#', '', $path), '/');
+            if ($storagePath) {
+                \Illuminate\Support\Facades\Storage::disk('public')->delete($storagePath);
+            }
+        }
+
+        return $this->success(['images' => $images], '图片已删除');
+    }
+
+    private function normalizeImagePayload(Request $request, string $field, Order $order): mixed
+    {
+        if (!$request->has($field)) {
+            return $order->$field;
+        }
+
+        $value = $request->input($field);
+        if ($value === null || $value === '' || $value === '[]') {
+            return null;
+        }
+
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        if (is_array($value)) {
+            return array_values(array_filter($value));
+        }
+
+        return $order->$field;
     }
 
     /**

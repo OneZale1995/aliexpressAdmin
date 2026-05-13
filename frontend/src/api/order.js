@@ -36,6 +36,10 @@ export function updateOrderBackendFields(data) {
   return request({ url: '/orders/update-backend-fields', method: 'post', data })
 }
 
+export function deleteOrderImage(data) {
+  return request({ url: '/orders/delete-image', method: 'post', data })
+}
+
 export function batchUpdateOrderBackendStatus(data) {
   return request({ url: '/orders/batch-update-backend-status', method: 'post', data })
 }

@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Product;
 use App\Services\AliExpressService;
 use Illuminate\Console\Command;
 
@@ -29,10 +30,54 @@ class EnrichSkuAttributes extends Command
 
         $this->info("Found {$total} orders to enrich.");
 
+        // 收集所有商品ID，预同步缺失的产品数据
+        $service = new AliExpressService();
+        $productIds = collect();
+        foreach ($orders as $order) {
+            if (!$order->shop) continue;
+            foreach ($order->items as $item) {
+                if ($item->ae_item_id) {
+                    $productIds->push([
+                        'shop_id' => $order->shop->id,
+                        'shop' => $order->shop,
+                        'product_id' => (string) $item->ae_item_id,
+                    ]);
+                }
+            }
+        }
+
+        $uniqueProductIds = $productIds->unique('product_id')->values();
+        $this->info("Unique products across orders: {$uniqueProductIds->count()}");
+
+        $missingIds = [];
+        foreach ($uniqueProductIds as $p) {
+            $exists = Product::where('shop_id', $p['shop_id'])
+                ->where('ae_item_id', $p['product_id'])
+                ->whereNotNull('skus')
+                ->exists();
+            if (!$exists) {
+                $missingIds[] = $p;
+            }
+        }
+
+        if (count($missingIds) > 0) {
+            $this->info('Pre-fetching ' . count($missingIds) . ' missing products...');
+            $syncBar = $this->output->createProgressBar(count($missingIds));
+            $syncBar->setFormat(" %current%/%max% [%bar%] %percent:3s%%  %message%");
+
+            foreach ($missingIds as $p) {
+                $syncBar->setMessage("Product #{$p['product_id']}");
+                $service->getProductDetail($p['shop'], $p['product_id']);
+                $syncBar->advance();
+            }
+            $syncBar->finish();
+            $this->line('');
+        }
+
+        $this->info('Enriching SKU attributes...');
         $bar = $this->output->createProgressBar($total);
         $bar->setFormat(" %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s%  %message%");
 
-        $service = new AliExpressService();
         $totalEnriched = 0;
         $startTime = microtime(true);
 

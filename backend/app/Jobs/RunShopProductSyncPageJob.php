@@ -49,8 +49,8 @@ class RunShopProductSyncPageJob implements ShouldQueue
                 ->onQueue($this->queue ?? 'default');
         }
 
-        foreach ($result['detail_product_ids'] ?? [] as $productId) {
-            RunShopProductDetailSyncJob::dispatch($this->shopId, (string) $productId)
+        if (!empty($result['detail_product_ids'])) {
+            RunShopProductsSyncJob::dispatch($this->shopId, array_map('strval', $result['detail_product_ids']))
                 ->onQueue($this->queue ?? 'default');
         }
 

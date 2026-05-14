@@ -4,13 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\RunProductExportTask;
-use App\Jobs\RunShopProductSyncJob;
 use App\Models\AliCategoryProperty;
 use App\Models\AliCategoryPropertyValue;
 use App\Models\Product;
 use App\Models\ProductExportTask;
 use App\Models\Shop;
 use App\Models\Team;
+use App\Services\ProductSyncStateService;
 use App\Services\ProductExportService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
@@ -31,7 +31,7 @@ class ProductController extends Controller
 
     private array $categoryPropertyValueCache = [];
 
-    public function index(Request $request)
+    public function index(Request $request, ProductSyncStateService $productSyncStateService)
     {
         $user = $request->user();
 
@@ -66,18 +66,29 @@ class ProductController extends Controller
         $items = (clone $query)
             ->offset(($page - 1) * $limit)
             ->limit($limit)
-            ->get()
-            ->map(function ($p) {
+            ->get();
+
+        $syncStates = $productSyncStateService->getStates($items->pluck('shop_id')->all());
+        $selectedShopSyncState = $request->filled('shop_id')
+            ? ($syncStates[(int) $request->shop_id] ?? $productSyncStateService->getState((int) $request->shop_id))
+            : null;
+
+        $items = $items->map(function ($p) use ($syncStates) {
                 $data = $p->toArray();
                 if (empty($data['main_image_url'])) {
                     $data['main_image_url'] = $this->extractProductImages($p)[0] ?? '';
                 }
                 $data['sku_count'] = is_array($p->skus) ? count($p->skus) : 0;
+                $data['sync_queue'] = $syncStates[(int) $p->shop_id] ?? null;
                 unset($data['raw_data'], $data['skus'], $data['properties']);
                 return $data;
             });
 
-        return $this->success(['total' => $total, 'items' => $items]);
+        return $this->success([
+            'total' => $total,
+            'items' => $items,
+            'sync_queue' => $selectedShopSyncState,
+        ]);
     }
 
     public function export(Request $request)
@@ -114,7 +125,7 @@ class ProductController extends Controller
         ]);
 
         try {
-            RunProductExportTask::dispatch($task->id)->onQueue('products');
+            RunProductExportTask::dispatch($task->id)->onQueue(RunProductExportTask::QUEUE_NAME);
         } catch (\Throwable $e) {
             $task->update([
                 'status' => 'failed',
@@ -793,7 +804,7 @@ class ProductController extends Controller
         return '';
     }
 
-    public function syncShop(Request $request)
+    public function syncShop(Request $request, ProductSyncStateService $productSyncStateService)
     {
         $request->validate(['shop_id' => 'required|exists:shops,id']);
 
@@ -802,9 +813,13 @@ class ProductController extends Controller
             return $this->error('该店铺未配置 access_token，无法同步商品');
         }
 
-        RunShopProductSyncJob::dispatch($shop->id)->onQueue('products');
+        $syncState = $productSyncStateService->dispatchShopSync($shop);
 
-        return $this->success(null, '商品同步任务已提交，同步完成后刷新列表即可');
+        $message = $productSyncStateService->isActive($syncState)
+            ? ((string) ($syncState['message'] ?? '商品同步任务已在队列中'))
+            : '商品同步任务已提交，同步完成后刷新列表即可';
+
+        return $this->success(['sync_queue' => $syncState], $message);
     }
 
     private function extractExportOptions(Request $request): array

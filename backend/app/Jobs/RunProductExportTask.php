@@ -18,6 +18,8 @@ class RunProductExportTask implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
+    public const QUEUE_NAME = 'product-exports';
+
     public int $tries = 1;
 
     public int $timeout = 60;

@@ -41,7 +41,7 @@ class RunOrderSkuEnrichmentTask implements ShouldQueue
             }
 
             $shop->makeVisible('access_token');
-            $service->enrichOrderItemSkuAttributes($shop, $order, false, false);
+            $service->enrichOrderItemSkuAttributes($shop, $order, false, true);
         } finally {
             Cache::forget($this->lockKey());
         }

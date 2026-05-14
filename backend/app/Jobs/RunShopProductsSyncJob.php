@@ -57,7 +57,7 @@ class RunShopProductsSyncJob implements ShouldQueue
 
         // 3. 找到关联订单，每个订单只补充一次
         $orderIds = OrderItem::whereIn('ae_item_id', $this->productIds)
-            ->whereNull('sku_attributes')
+            ->needsSkuSync()
             ->pluck('order_id')
             ->unique()
             ->values()

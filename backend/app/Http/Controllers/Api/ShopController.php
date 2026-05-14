@@ -3,9 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Jobs\RunShopProductSyncJob;
 use App\Models\Shop;
 use App\Models\Team;
+use App\Services\ProductSyncStateService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
 
@@ -43,7 +43,7 @@ class ShopController extends Controller
         return $this->paginate($query, $request);
     }
 
-    public function store(Request $request)
+    public function store(Request $request, ProductSyncStateService $productSyncStateService)
     {
         $user = $request->user();
 
@@ -98,7 +98,11 @@ class ShopController extends Controller
 
         // 如有 access_token，异步拉取该店铺商品列表
         if ($shop->access_token) {
-            RunShopProductSyncJob::dispatch($shop->id)->onQueue('products');
+            try {
+                $productSyncStateService->dispatchShopSync($shop);
+            } catch (\Throwable $e) {
+                // 创建店铺不因自动同步启动失败而回滚
+            }
         }
 
         return $this->success($shop->load(['user:id,username,nickname', 'team:id,name']));

@@ -219,7 +219,7 @@ class ProductExportService
             ];
         }
 
-        RunProductExportTask::dispatch($task->id)->onQueue('products');
+        RunProductExportTask::dispatch($task->id)->onQueue(RunProductExportTask::QUEUE_NAME);
 
         return [
             'success' => true,

@@ -22,7 +22,7 @@ class EnrichSkuAttributes extends Command
             ->whereHas('shop', fn($q) => $q->whereNotNull('access_token'));
 
         if (!$force) {
-            $query->whereHas('items', fn($q) => $q->whereNull('sku_attributes'));
+            $query->whereHas('items', fn($q) => $q->needsSkuSync());
         }
 
         $orders = $query->limit($limit)->get();
@@ -55,15 +55,26 @@ class EnrichSkuAttributes extends Command
             $data['product_ids'] = array_values($unique);
             $totalProducts += count($unique);
 
-            // 拆分为已有数据和缺失数据
-            $existing = Product::where('shop_id', $sid)
+            // 拆分为已有数据、永久404、以及仍需拉取详情的商品
+            $existingProducts = Product::where('shop_id', $sid)
                 ->whereIn('ae_item_id', $unique)
-                ->whereNotNull('skus')
-                ->pluck('ae_item_id')
-                ->toArray();
+                ->get(['ae_item_id', 'skus', 'detail_not_found_at']);
 
-            $existingMap = array_flip($existing);
-            $missing = array_values(array_filter($unique, fn($id) => !isset($existingMap[$id])));
+            $existing = [];
+            $notFound = [];
+            foreach ($existingProducts as $product) {
+                if ($product->detail_not_found_at) {
+                    $notFound[] = (string) $product->ae_item_id;
+                    continue;
+                }
+
+                if (!empty($product->skus)) {
+                    $existing[] = (string) $product->ae_item_id;
+                }
+            }
+
+            $knownMap = array_flip(array_merge($existing, $notFound));
+            $missing = array_values(array_filter($unique, fn($id) => !isset($knownMap[$id])));
 
             if (!empty($missing)) {
                 RunShopProductsSyncJob::dispatch($sid, $missing)->onQueue('products');

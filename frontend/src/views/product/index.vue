@@ -39,8 +39,23 @@
         <el-option label="编辑中 (editing)" value="editing" />
       </el-select>
       <el-button class="filter-item" type="primary" icon="el-icon-search" @click="handleFilter">搜索</el-button>
-      <el-button class="filter-item" icon="el-icon-refresh" @click="handleRefresh">同步商品</el-button>
+      <el-button
+        class="filter-item"
+        icon="el-icon-refresh"
+        :loading="syncSubmitting"
+        :disabled="!listQuery.shop_id || isSyncActive(currentSyncQueue)"
+        @click="handleRefresh"
+      >同步商品</el-button>
     </div>
+
+    <el-alert
+      v-if="currentSyncQueue"
+      :title="buildCurrentSyncTitle(currentSyncQueue)"
+      :type="queueAlertType(currentSyncQueue.status)"
+      show-icon
+      :closable="false"
+      style="margin-bottom: 12px;"
+    />
 
     <el-alert
       v-if="syncTip"
@@ -89,6 +104,15 @@
           <el-tag :type="statusTagType(row.status_type)" size="small">{{ statusLabel(row.status_type) }}</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="同步队列" align="center" width="150">
+        <template slot-scope="{row}">
+          <div v-if="row.sync_queue">
+            <el-tag :type="queueTagType(row.sync_queue.status)" size="small">{{ queueStatusLabel(row.sync_queue.status) }}</el-tag>
+            <div style="font-size:12px;color:#909399;margin-top:4px;">{{ row.sync_queue.queue || '-' }}</div>
+          </div>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="店铺" align="center" width="140">
         <template slot-scope="{row}">{{ row.shop ? row.shop.name : '-' }}</template>
       </el-table-column>
@@ -121,6 +145,9 @@ export default {
   data() {
     return {
       listLoading: false,
+      syncSubmitting: false,
+      syncPollingTimer: null,
+      currentSyncQueue: null,
       syncTip: '',
       previewImg: '',
       previewVisible: false,
@@ -141,6 +168,9 @@ export default {
     this.loadShopOptions()
     this.getList()
   },
+  beforeDestroy() {
+    this.stopSyncPolling()
+  },
   methods: {
     loadShopOptions() {
       fetchShopList({ page: 1, limit: 200 }).then(res => {
@@ -158,8 +188,8 @@ export default {
       getProductList(query).then(res => {
         this.list = (res.data && res.data.items) || []
         this.total = (res.data && res.data.total) || 0
-      }).finally(() => {
-        this.listLoading = false
+        this.currentSyncQueue = (res.data && res.data.sync_queue) || null
+        this.updateSyncPolling()
       }).finally(() => {
         this.listLoading = false
       })
@@ -173,11 +203,67 @@ export default {
         this.$message.warning('请先选择一个店铺再同步')
         return
       }
+      if (this.isSyncActive(this.currentSyncQueue)) {
+        this.$message.info(this.currentSyncQueue.message || '该店铺商品正在同步，请勿重复提交')
+        return
+      }
+      this.syncSubmitting = true
       syncShopProducts({ shop_id: this.listQuery.shop_id }).then(res => {
+        this.currentSyncQueue = (res.data && res.data.sync_queue) || this.currentSyncQueue
         this.syncTip = res.message || '同步任务已提交，完成后刷新列表'
+        this.updateSyncPolling()
+        this.getList()
       }).catch(err => {
         this.$message.error((err && err.message) || '同步任务提交失败')
+      }).finally(() => {
+        this.syncSubmitting = false
       })
+    },
+    isSyncActive(syncQueue) {
+      if (!syncQueue) return false
+      return ['pending', 'running'].includes(syncQueue.status)
+    },
+    updateSyncPolling() {
+      if (this.listQuery.shop_id && this.isSyncActive(this.currentSyncQueue)) {
+        this.startSyncPolling()
+        return
+      }
+
+      this.stopSyncPolling()
+    },
+    startSyncPolling() {
+      if (this.syncPollingTimer) return
+      this.syncPollingTimer = setInterval(() => {
+        if (!this.listQuery.shop_id) {
+          this.stopSyncPolling()
+          return
+        }
+        this.getList()
+      }, 5000)
+    },
+    stopSyncPolling() {
+      if (!this.syncPollingTimer) return
+      clearInterval(this.syncPollingTimer)
+      this.syncPollingTimer = null
+    },
+    buildCurrentSyncTitle(syncQueue) {
+      const shopName = syncQueue.shop_name ? `店铺 ${syncQueue.shop_name}` : '当前店铺'
+      const queueName = syncQueue.queue || 'products'
+      const statusLabel = this.queueStatusLabel(syncQueue.status)
+      const message = syncQueue.message || ''
+      return `${shopName} 正在 ${queueName} 队列中，状态：${statusLabel}${message ? `，${message}` : ''}`
+    },
+    queueAlertType(status) {
+      const map = { pending: 'info', running: 'warning', completed: 'success', failed: 'error' }
+      return map[status] || 'info'
+    },
+    queueTagType(status) {
+      const map = { pending: 'info', running: 'warning', completed: 'success', failed: 'danger' }
+      return map[status] || 'info'
+    },
+    queueStatusLabel(status) {
+      const map = { pending: '排队中', running: '同步中', completed: '已完成', failed: '失败' }
+      return map[status] || status || '-'
     },
     resolveMainImage(row) {
       if (!row) {

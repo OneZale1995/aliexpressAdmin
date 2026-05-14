@@ -11,6 +11,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class RunShopProductDetailSyncJob implements ShouldQueue
@@ -30,20 +31,24 @@ class RunShopProductDetailSyncJob implements ShouldQueue
 
     public function handle(AliExpressService $service): void
     {
-        $shop = Shop::find($this->shopId);
-        if (!$shop || !$shop->access_token) {
-            return;
+        try {
+            $shop = Shop::find($this->shopId);
+            if (!$shop || !$shop->access_token) {
+                return;
+            }
+
+            $service->getProductDetail($shop, $this->productId);
+
+            $this->enrichRelatedOrders($shop, $service);
+        } finally {
+            Cache::forget(self::lockKey($this->shopId, $this->productId));
         }
-
-        $service->getProductDetail($shop, $this->productId);
-
-        $this->enrichRelatedOrders($shop, $service);
     }
 
     protected function enrichRelatedOrders(Shop $shop, AliExpressService $service): void
     {
         $orderIds = OrderItem::where('ae_item_id', $this->productId)
-            ->whereNull('sku_attributes')
+            ->needsSkuSync()
             ->pluck('order_id')
             ->unique()
             ->toArray();
@@ -60,10 +65,17 @@ class RunShopProductDetailSyncJob implements ShouldQueue
 
     public function failed(\Throwable $e): void
     {
+        Cache::forget(self::lockKey($this->shopId, $this->productId));
+
         Log::channel('third_party')->error('Shop product detail sync failed', [
             'shop_id' => $this->shopId,
             'product_id' => $this->productId,
             'message' => $e->getMessage(),
         ]);
+    }
+
+    public static function lockKey(int $shopId, string $productId): string
+    {
+        return sprintf('ali:product-detail-sync:%d:%s', $shopId, trim($productId));
     }
 }

@@ -144,12 +144,12 @@ class OrderSyncTaskService
                 $orderIds = $result['order_ids'] ?? [];
                 if (!empty($orderIds)) {
                     try {
-                        $enriched = $service->enrichOrdersSkuBatch($shop, $orderIds);
-                        Log::info('Order sync SKU batch enrichment done', [
+                        $queued = $service->queueOrdersSkuBatch($shop, $orderIds);
+                        Log::info('Order sync SKU batch enrichment queued', [
                             'task_id' => $taskId,
                             'shop_id' => $shopId,
                             'order_count' => count($orderIds),
-                            'enriched' => $enriched,
+                            'queued' => $queued,
                         ]);
                     } catch (\Throwable $e) {
                         Log::warning('Order sync SKU batch enrichment failed', [

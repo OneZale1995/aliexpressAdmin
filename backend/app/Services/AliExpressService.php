@@ -19,6 +19,8 @@ class AliExpressService
 {
     private const SKU_ENRICH_LOCK_TTL_SECONDS = 600;
 
+    private const PRODUCT_DETAIL_SYNC_LOCK_TTL_SECONDS = 86400;
+
     protected string $baseUrl;
     protected bool $verifySsl;
     protected OrderLogisticsService $orderLogisticsService;
@@ -1457,8 +1459,17 @@ class AliExpressService
 
     public function getProductDetail(Shop $shop, string $productId, bool $skipCategorySync = false): ?array
     {
+        $productId = trim($productId);
+        if ($productId === '') {
+            return null;
+        }
+
         $token = $shop->access_token;
         if (!$token) {
+            return null;
+        }
+
+        if ($this->hasProductDetailBeenMarkedNotFound((int) $shop->id, $productId)) {
             return null;
         }
 
@@ -1478,13 +1489,21 @@ class AliExpressService
                 ]);
 
             $data = $response->json();
-            if (!$response->successful() || isset($data['error'])) {
+            $payload = is_array($data) ? $data : [];
+            if (!$response->successful() || isset($payload['error'])) {
+                $markedNotFound = $this->isProductDetailNotFoundResponse($response->status(), $payload);
+                if ($markedNotFound) {
+                    $this->markProductDetailNotFound($shop, $productId);
+                }
+
                 $this->thirdPartyLog()->warning('AliExpress getProductDetail failed', [
                     'product_id' => $productId,
-                    'response'   => $data,
+                    'status' => $response->status(),
+                    'marked_not_found' => $markedNotFound,
+                    'response'   => $payload,
                 ]);
 
-                $errorMsg = $data['error']['message'] ?? '';
+                $errorMsg = $payload['error']['message'] ?? '';
                 if ($response->status() === 401 || str_contains($errorMsg, 'GetTokenByID') || str_contains($errorMsg, 'cannot GetToken')) {
                     $shop->update(['token_invalid_at' => now()]);
                 }
@@ -1629,7 +1648,7 @@ class AliExpressService
     {
         $itemsQuery = $order->items();
         if (!$force) {
-            $itemsQuery->whereNull('sku_attributes');
+            $itemsQuery->needsSkuSync();
         }
         $items = $itemsQuery->get();
         if ($items->isEmpty()) {
@@ -1645,15 +1664,25 @@ class AliExpressService
         $productIds = $items->pluck('ae_item_id')->unique()->filter()->map(fn($id) => (string) $id)->values()->toArray();
 
         foreach ($productIds as $productId) {
+            $relatedItems = $items->where('ae_item_id', $productId);
+
+            if ($this->hasProductDetailBeenMarkedNotFound((int) $shop->id, $productId)) {
+                $this->markOrderItemsSkuSyncStatus($relatedItems, OrderItem::SKU_SYNC_STATUS_PRODUCT_NOT_FOUND);
+
+                continue;
+            }
+
             $localProduct = Product::where('shop_id', $shop->id)
                 ->where('ae_item_id', $productId)
-                ->whereNotNull('skus')
                 ->first();
 
             if (!$localProduct || empty($localProduct->skus)) {
                 if ($dispatchJobs) {
-                RunShopProductDetailSyncJob::dispatch((int) $shop->id, $productId)->onQueue('products');
-            }
+                    $this->dispatchProductDetailSyncTask((int) $shop->id, $productId);
+                    $this->markOrderItemsSkuSyncStatus($relatedItems, OrderItem::SKU_SYNC_STATUS_PENDING);
+                } else {
+                    $this->markOrderItemsSkuSyncStatus($relatedItems, OrderItem::SKU_SYNC_STATUS_FAILED);
+                }
                 continue;
             }
 
@@ -1669,8 +1698,11 @@ class AliExpressService
 
             if (!$hasFullPropertyData) {
                 if ($dispatchJobs) {
-                RunShopProductDetailSyncJob::dispatch((int) $shop->id, $productId)->onQueue('products');
-            }
+                    $this->dispatchProductDetailSyncTask((int) $shop->id, $productId);
+                    $this->markOrderItemsSkuSyncStatus($relatedItems, OrderItem::SKU_SYNC_STATUS_PENDING);
+                } else {
+                    $this->markOrderItemsSkuSyncStatus($relatedItems, OrderItem::SKU_SYNC_STATUS_FAILED);
+                }
                 continue;
             }
 
@@ -1711,16 +1743,22 @@ class AliExpressService
                 $skuMap[$skuId] = $attrs;
             }
 
-            $relatedItems = $items->where('ae_item_id', $productId);
             foreach ($relatedItems as $item) {
                 $skuId = (string) ($item->ae_sku_id ?? '');
                 if ($skuId !== '' && array_key_exists($skuId, $skuMap)) {
                     $attrs = $skuMap[$skuId];
-                    $item->update(['sku_attributes' => $attrs]);
+                    $item->update([
+                        'sku_attributes' => $attrs,
+                        'sku_sync_status' => OrderItem::SKU_SYNC_STATUS_SYNCED,
+                    ]);
                     if (!empty($attrs)) {
                         $enriched++;
                     }
+
+                    continue;
                 }
+
+                $this->markOrderItemsSkuSyncStatus([$item], OrderItem::SKU_SYNC_STATUS_FAILED);
             }
         }
 
@@ -1841,6 +1879,10 @@ class AliExpressService
     {
         if (!$existing) {
             return true;
+        }
+
+        if ($existing->detail_not_found_at) {
+            return false;
         }
 
         if ($existing->category_name === '') {
@@ -1991,6 +2033,7 @@ class AliExpressService
                     'ae_created_at' => $this->parseDate($detail['ali_created_at'] ?? null),
                     'ae_updated_at' => $this->parseDate($detail['ali_updated_at'] ?? null),
                     'synced_at' => now(),
+                    'detail_not_found_at' => null,
                 ]
             );
         } catch (\Throwable $e) {
@@ -2347,19 +2390,126 @@ class AliExpressService
         return $total;
     }
 
-    protected function dispatchSkuEnrichmentTask(int $shopId, int $orderId): void
+    public function queueOrdersSkuBatch(Shop $shop, array $orderIds): int
+    {
+        $queued = 0;
+
+        foreach (array_unique(array_map('intval', $orderIds)) as $orderId) {
+            if ($orderId <= 0) {
+                continue;
+            }
+
+            if ($this->dispatchSkuEnrichmentTask((int) $shop->id, $orderId)) {
+                $queued++;
+            }
+        }
+
+        return $queued;
+    }
+
+    protected function dispatchSkuEnrichmentTask(int $shopId, int $orderId): bool
     {
         $lockKey = $this->skuEnrichLockKey($orderId);
         if (!Cache::add($lockKey, now()->toDateTimeString(), now()->addSeconds(self::SKU_ENRICH_LOCK_TTL_SECONDS))) {
-            return;
+            return false;
         }
 
-        RunOrderSkuEnrichmentTask::dispatch($shopId, $orderId);
+        try {
+            RunOrderSkuEnrichmentTask::dispatch($shopId, $orderId)->onQueue('orders');
+
+            return true;
+        } catch (\Throwable $e) {
+            Cache::forget($lockKey);
+
+            throw $e;
+        }
     }
 
     protected function skuEnrichLockKey(int $orderId): string
     {
         return sprintf('ali:order-sku-enrich:lock:%d', $orderId);
+    }
+
+    protected function dispatchProductDetailSyncTask(int $shopId, string $productId): bool
+    {
+        $productId = trim($productId);
+        if ($productId === '') {
+            return false;
+        }
+
+        if ($this->hasProductDetailBeenMarkedNotFound($shopId, $productId)) {
+            return false;
+        }
+
+        $lockKey = RunShopProductDetailSyncJob::lockKey($shopId, $productId);
+        if (!Cache::add($lockKey, now()->toDateTimeString(), now()->addSeconds(self::PRODUCT_DETAIL_SYNC_LOCK_TTL_SECONDS))) {
+            return false;
+        }
+
+        try {
+            RunShopProductDetailSyncJob::dispatch($shopId, $productId)->onQueue('products');
+
+            return true;
+        } catch (\Throwable $e) {
+            Cache::forget($lockKey);
+
+            throw $e;
+        }
+    }
+
+    protected function markOrderItemsSkuSyncStatus(iterable $items, string $status): void
+    {
+        foreach ($items as $item) {
+            if (!$item instanceof OrderItem) {
+                continue;
+            }
+
+            if ($status !== OrderItem::SKU_SYNC_STATUS_SYNCED && $item->sku_attributes !== null) {
+                continue;
+            }
+
+            if ((string) $item->sku_sync_status === $status) {
+                continue;
+            }
+
+            $item->update(['sku_sync_status' => $status]);
+        }
+    }
+
+    protected function hasProductDetailBeenMarkedNotFound(int $shopId, string $productId): bool
+    {
+        return Product::query()
+            ->where('shop_id', $shopId)
+            ->where('ae_item_id', $productId)
+            ->whereNotNull('detail_not_found_at')
+            ->exists();
+    }
+
+    protected function isProductDetailNotFoundResponse(int $status, array $data): bool
+    {
+        if ($status === 404) {
+            return true;
+        }
+
+        $errorCode = strtolower(trim((string) data_get($data, 'error.code', '')));
+        $errorMessage = strtolower(trim((string) data_get($data, 'error.message', '')));
+
+        return $errorCode === '404'
+            || str_contains($errorCode, 'notfound')
+            || str_contains($errorCode, 'not_found')
+            || str_contains($errorMessage, 'not found')
+            || str_contains($errorMessage, 'does not exist');
+    }
+
+    protected function markProductDetailNotFound(Shop $shop, string $productId): void
+    {
+        Product::updateOrCreate(
+            ['shop_id' => $shop->id, 'ae_item_id' => $productId],
+            [
+                'detail_not_found_at' => now(),
+                'synced_at' => now(),
+            ]
+        );
     }
 
     protected function isTransientNetworkError(\Throwable $e): bool

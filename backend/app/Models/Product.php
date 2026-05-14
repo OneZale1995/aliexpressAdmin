@@ -58,6 +58,7 @@ class Product extends Model
         'ae_created_at',
         'ae_updated_at',
         'synced_at',
+        'detail_not_found_at',
     ];
 
     protected $casts = [
@@ -79,6 +80,7 @@ class Product extends Model
         'ae_created_at' => 'datetime',
         'ae_updated_at' => 'datetime',
         'synced_at' => 'datetime',
+        'detail_not_found_at' => 'datetime',
     ];
 
     public function shop()

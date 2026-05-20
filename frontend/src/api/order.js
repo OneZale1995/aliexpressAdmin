@@ -179,3 +179,19 @@ export function sz56tGetTrackingNumber(data) {
 export function sz56tCancelOrder(data) {
   return request({ url: '/orders/sz56t/cancel', method: 'post', data })
 }
+
+export function fetchBlacklist(data) {
+  return request({ url: '/order-blacklists/list', method: 'post', data })
+}
+
+export function createBlacklist(data) {
+  return request({ url: '/order-blacklists/create', method: 'post', data })
+}
+
+export function updateBlacklist(data) {
+  return request({ url: '/order-blacklists/update', method: 'post', data })
+}
+
+export function deleteBlacklist(data) {
+  return request({ url: '/order-blacklists/delete', method: 'post', data })
+}

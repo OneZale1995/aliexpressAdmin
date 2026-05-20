@@ -122,6 +122,12 @@ export const asyncRoutes = [
         meta: { title: '订单统计', icon: 'el-icon-data-analysis' }
       },
       {
+        path: 'blacklist',
+        component: () => import('@/views/order/blacklist'),
+        name: 'OrderBlacklist',
+        meta: { title: '订单黑名单', icon: 'el-icon-warning-outline' }
+      },
+      {
         path: 'customs-product',
         component: () => import('@/views/system/customs-product'),
         name: 'CustomsProduct',

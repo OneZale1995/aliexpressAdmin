@@ -22,7 +22,7 @@
         <div class="col-ops">操作</div>
       </div>
 
-      <div v-for="order in list" :key="order.id" class="order-card">
+      <div v-for="order in list" :key="order.id" class="order-card" :class="{ 'order-card--blacklisted': order.blacklist_match && order.blacklist_match.matched }">
         <div class="order-row">
           <div class="col-check cell-check">
             <el-checkbox :value="selectedOrders.includes(order.id)" @change="$emit('toggle-select', order.id)" />
@@ -63,6 +63,15 @@
             <div class="meta-line"><span class="label">下单</span><span class="highlight-date">{{ formatDate(order.ae_created_at) }}</span></div>
             <div class="meta-line"><span class="label">件数</span><span :class="{ 'qty-badge': (getOrderItemCount(order) || 1) > 1 }">{{ getOrderItemCount(order) || 1 }}</span></div>
             <div class="meta-line"><span class="label">买家</span>{{ order.buyer_name || '-' }}</div>
+            <div v-if="order.blacklist_match && order.blacklist_match.matched" class="meta-line blacklist-warning">
+              <span class="label blacklist-warning-label">⚠️ 黑名单</span>
+              <span class="blacklist-match-detail">
+                <template v-for="(detail, idx) in order.blacklist_match.details">
+                  <span v-if="idx > 0" :key="'sep' + idx">；</span>
+                  <span :key="idx">{{ detail.field === 'name' ? '姓名' : '电话' }}匹配：{{ detail.matched_value }}</span>
+                </template>
+              </span>
+            </div>
             <div class="meta-line"><span class="label">状态</span><el-tag :type="getStatusTagType(order.order_display_status)" size="mini">{{ getStatusLabel(order.order_display_status) }}</el-tag></div>
             <div v-if="getOrderIssueStatus(order)" class="meta-line">
               <span class="label">争议</span>
@@ -640,6 +649,32 @@ export default {
   font-size: 12px;
   color: #e6a23c;
   font-weight: 500;
+}
+
+.order-card--blacklisted {
+  border-left: 4px solid #f56c6c !important;
+  background: #fef0f0 !important;
+}
+
+.blacklist-warning {
+  background: #fef0f0;
+  border: 1px solid #fab6b6;
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.blacklist-warning-label {
+  color: #f56c6c !important;
+  font-weight: 700 !important;
+  width: auto !important;
+}
+
+.blacklist-match-detail {
+  color: #f56c6c;
+  font-weight: 600;
+  font-size: 12px;
 }
 
 @media (max-width: 1400px) {

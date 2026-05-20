@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\LoginLogController;
 use App\Http\Controllers\Api\LogisticsConfigController;
 use App\Http\Controllers\Api\MenuController;
 use App\Http\Controllers\Api\OperationLogController;
+use App\Http\Controllers\Api\OrderBlacklistController;
 use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\OrderLogisticsController;
 use App\Http\Controllers\Api\PermissionController;
@@ -116,6 +117,12 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     Route::post('/customs-products/create', [CustomsProductController::class, 'create']);
     Route::post('/customs-products/update', [CustomsProductController::class, 'update']);
     Route::post('/customs-products/delete', [CustomsProductController::class, 'delete']);
+
+    // 订单黑名单管理
+    Route::post('/order-blacklists/list', [OrderBlacklistController::class, 'index']);
+    Route::post('/order-blacklists/create', [OrderBlacklistController::class, 'store']);
+    Route::post('/order-blacklists/update', [OrderBlacklistController::class, 'update']);
+    Route::post('/order-blacklists/delete', [OrderBlacklistController::class, 'destroy']);
 
     // 团队用户管理（团队管理员添加/管理采购用户）
     Route::post('/team-users/list', [TeamUserController::class, 'index']);

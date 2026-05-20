@@ -7,6 +7,7 @@ use App\Jobs\RunOrderSyncTask;
 use App\Models\DictType;
 use App\Models\Order;
 use App\Models\OrderSyncTask;
+use App\Models\OrderBlacklist;
 use App\Models\Shop;
 use App\Models\SystemConfig;
 use App\Models\Team;
@@ -158,7 +159,18 @@ class OrderController extends Controller
 
         $query->orderBy('ae_created_at', 'desc');
 
-        return $this->paginate($query, $request);
+        $page = (int) $request->get('page', 1);
+        $limit = (int) $request->get('limit', 20);
+
+        $total = $query->count();
+        $items = $query->offset(($page - 1) * $limit)->limit($limit)->get();
+
+        $this->attachBlacklistMatches($items, $user);
+
+        return $this->success([
+            'total' => $total,
+            'items' => $items,
+        ]);
     }
 
     /**
@@ -941,6 +953,91 @@ class OrderController extends Controller
         }
 
         return $query->get();
+    }
+
+    private function attachBlacklistMatches($orders, $user): void
+    {
+        if ($orders->isEmpty()) {
+            return;
+        }
+
+        $teamIds = [];
+        if ($user->hasRole('super-admin')) {
+            $teamIds = Team::pluck('id')->toArray();
+        } elseif ($this->isTeamAdmin($user)) {
+            $teamIds = Team::where('admin_user_id', $user->id)->pluck('id')->toArray();
+        } else {
+            $teamIds = $user->teams()->pluck('teams.id')->toArray();
+        }
+
+        if (empty($teamIds)) {
+            return;
+        }
+
+        $blacklistEntries = OrderBlacklist::whereIn('team_id', $teamIds)->get();
+
+        if ($blacklistEntries->isEmpty()) {
+            return;
+        }
+
+        foreach ($orders as $order) {
+            $matches = [];
+
+            foreach ($blacklistEntries as $entry) {
+                if (!empty($entry->name) && (
+                    $this->matchName($entry->name, $order->buyer_name)
+                    || $this->matchName($entry->name, $order->receiver_name)
+                )) {
+                    $matches[] = [
+                        'entry_id' => $entry->id,
+                        'field' => 'name',
+                        'matched_value' => $entry->name,
+                        'remark' => $entry->remark,
+                    ];
+                }
+
+                if (!empty($entry->phone) && (
+                    $this->matchPhone($entry->phone, $order->buyer_phone)
+                    || $this->matchPhone($entry->phone, $order->receiver_phone)
+                )) {
+                    $matches[] = [
+                        'entry_id' => $entry->id,
+                        'field' => 'phone',
+                        'matched_value' => $entry->phone,
+                        'remark' => $entry->remark,
+                    ];
+                }
+            }
+
+            $order->blacklist_match = !empty($matches) ? [
+                'matched' => true,
+                'details' => $matches,
+            ] : null;
+        }
+    }
+
+    private function matchName(string $blacklistName, ?string $orderName): bool
+    {
+        if (empty($orderName)) {
+            return false;
+        }
+
+        $blacklistName = mb_strtolower(trim($blacklistName));
+        $orderName = mb_strtolower(trim($orderName));
+
+        return $blacklistName === $orderName || str_contains($orderName, $blacklistName);
+    }
+
+    private function matchPhone(string $blacklistPhone, ?string $orderPhone): bool
+    {
+        if (empty($orderPhone)) {
+            return false;
+        }
+
+        $blacklistPhone = preg_replace('/[^0-9]/', '', $blacklistPhone);
+        $orderPhone = preg_replace('/[^0-9]/', '', $orderPhone);
+
+        return $blacklistPhone === $orderPhone || str_contains($orderPhone, $blacklistPhone);
     }
 
 }

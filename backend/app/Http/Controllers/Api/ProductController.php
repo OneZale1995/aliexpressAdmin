@@ -25,7 +25,7 @@ class ProductController extends Controller
 {
     use ApiResponse;
 
-    private const EXPORT_PROFILE = 'template-xlsx-v1';
+    private const EXPORT_PROFILE = 'template-streaming-xlsx-v3';
 
     private array $categoryPropertyNameCache = [];
 

@@ -22,7 +22,7 @@ class RunProductExportTask implements ShouldQueue
 
     public int $tries = 1;
 
-    public int $timeout = 60;
+    public int $timeout = 1800;
 
     public function __construct(public int $taskId)
     {

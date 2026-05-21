@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Jobs\RunProductExportTask;
 use App\Models\AliCategoryProperty;
 use App\Models\AliCategoryPropertyValue;
 use App\Models\Product;
@@ -12,21 +11,18 @@ use App\Models\Team;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Storage;
-use PhpOffice\PhpSpreadsheet\IOFactory;
-use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Style\Alignment;
-use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use ZipArchive;
 
 class ProductExportService
 {
     private const CHUNK_SIZE = 1000;
 
-    private const MAX_ROWS_PER_FILE = 10000;
+    // Stream writing keeps memory flat; this cap now mainly controls file size and download usability.
+    private const MAX_ROWS_PER_FILE = 20000;
 
     private const FILE_EXPIRES_DAYS = 7;
 
-    private const EXPORT_PROFILE = 'template-xlsx-v1';
+    private const EXPORT_PROFILE = 'template-streaming-xlsx-v3';
 
     private const TEMPLATE_RELATIVE_PATH = 'templates/product_export_template.xlsx';
 
@@ -118,17 +114,12 @@ class ProductExportService
     private function processNextChunk(ProductExportTask $task, User $user, array $options): array
     {
         $details = is_array($task->details) ? $task->details : [];
-        $lastId = (int) ($details['last_id'] ?? 0);
-        $partIndex = max(1, (int) ($details['current_part_index'] ?? 1));
-        $rowsInCurrentFile = max(0, (int) ($details['rows_in_current_file'] ?? 0));
-        $filePaths = array_values(array_filter((array) ($details['file_paths'] ?? [])));
+        $this->resetInterruptedStreamState($task, $details);
 
         if ((int) $task->total_rows === 0) {
-            if (empty($filePaths)) {
-                $filePaths[] = $this->createCsvFile($task->id, 1);
-            }
+            $filePath = $this->createEmptyXlsxFile($task->id, 1);
 
-            $this->markTaskCompleted($task->fresh() ?: $task, $filePaths);
+            $this->markTaskCompleted($task->fresh() ?: $task, [$filePath]);
 
             return [
                 'success' => true,
@@ -137,93 +128,72 @@ class ProductExportService
             ];
         }
 
-        $products = $this->buildExportQuery($user, $options)
-            ->with('shop:id,name,logistics_route,logistics_template_id,logistics_template_name')
-            ->where('id', '>', $lastId)
-            ->orderBy('id')
-            ->limit(self::CHUNK_SIZE)
-            ->get();
-
-        if ($products->isEmpty()) {
-            $this->markTaskCompleted($task->fresh() ?: $task, $filePaths);
-
-            return [
-                'success' => true,
-                'message' => '导出任务已完成',
-                'skipped' => false,
-            ];
-        }
-
-        if (!isset($filePaths[$partIndex - 1])) {
-            $filePaths[$partIndex - 1] = $this->createCsvFile($task->id, $partIndex);
-        }
-
-        $currentFilePath = $filePaths[$partIndex - 1];
-        $handle = fopen($this->absoluteStoragePath($currentFilePath), 'ab');
-
-        if ($handle === false) {
-            throw new \RuntimeException('无法打开导出文件进行写入');
-        }
+        $partIndex = 1;
+        $rowsInCurrentFile = 0;
+        $processedRows = 0;
+        $lastProcessedId = 0;
+        $filePaths = [];
+        $partContext = $this->startTemplatePartContext($task->id, $partIndex);
 
         try {
-            foreach ($products as $product) {
-                if ($rowsInCurrentFile >= self::MAX_ROWS_PER_FILE) {
-                    fclose($handle);
-                    $partIndex++;
-                    $rowsInCurrentFile = 0;
+            while (true) {
+                $products = $this->buildExportQuery($user, $options)
+                    ->with('shop:id,name,logistics_route,logistics_template_id,logistics_template_name')
+                    ->where('id', '>', $lastProcessedId)
+                    ->orderBy('id')
+                    ->limit(self::CHUNK_SIZE)
+                    ->get();
 
-                    if (!isset($filePaths[$partIndex - 1])) {
-                        $filePaths[$partIndex - 1] = $this->createCsvFile($task->id, $partIndex);
-                    }
-
-                    $currentFilePath = $filePaths[$partIndex - 1];
-                    $handle = fopen($this->absoluteStoragePath($currentFilePath), 'ab');
-                    if ($handle === false) {
-                        throw new \RuntimeException('无法打开导出分片文件进行写入');
-                    }
+                if ($products->isEmpty()) {
+                    break;
                 }
 
-                fputcsv($handle, $this->buildProductExportRow($product));
-                $rowsInCurrentFile++;
+                foreach ($products as $product) {
+                    if ($rowsInCurrentFile >= self::MAX_ROWS_PER_FILE) {
+                        $filePaths[] = $this->finalizeTemplatePartContext($partContext);
+                        $partIndex++;
+                        $rowsInCurrentFile = 0;
+                        $partContext = $this->startTemplatePartContext($task->id, $partIndex);
+                    }
+
+                    $this->appendProductExportRowXml($partContext, $product);
+                    $rowsInCurrentFile++;
+                    $processedRows++;
+                }
+
+                $lastProcessedId = (int) $products->last()->id;
+                $progress = $this->calculateProgress($processedRows, (int) $task->total_rows);
+
+                $task->fill([
+                    'processed_rows' => $processedRows,
+                    'progress' => $progress,
+                    'message' => sprintf('导出中，已处理 %d / %d 条商品', $processedRows, (int) $task->total_rows),
+                    'details' => [
+                        'last_id' => $lastProcessedId,
+                        'current_part_index' => $partIndex,
+                        'rows_in_current_file' => $rowsInCurrentFile,
+                        'file_paths' => array_values($filePaths),
+                    ],
+                ]);
+                $task->save();
             }
         } finally {
-            if (is_resource($handle)) {
-                fclose($handle);
+            if (isset($partContext['rows_handle']) && is_resource($partContext['rows_handle'])) {
+                fclose($partContext['rows_handle']);
             }
         }
 
-        $processedRows = (int) $task->processed_rows + $products->count();
-        $lastProcessedId = (int) $products->last()->id;
-        $progress = $this->calculateProgress($processedRows, (int) $task->total_rows);
-
-        $task->fill([
-            'processed_rows' => $processedRows,
-            'progress' => $progress,
-            'message' => sprintf('导出中，已处理 %d / %d 条商品', $processedRows, (int) $task->total_rows),
-            'details' => [
-                'last_id' => $lastProcessedId,
-                'current_part_index' => $partIndex,
-                'rows_in_current_file' => $rowsInCurrentFile,
-                'file_paths' => array_values($filePaths),
-            ],
-        ]);
-        $task->save();
-
-        if ($processedRows >= (int) $task->total_rows) {
-            $this->markTaskCompleted($task->fresh() ?: $task, $filePaths);
-
-            return [
-                'success' => true,
-                'message' => '导出任务已完成',
-                'skipped' => false,
-            ];
+        if ($rowsInCurrentFile > 0) {
+            $filePaths[] = $this->finalizeTemplatePartContext($partContext);
+        } else {
+            $this->discardTemplatePartContext($partContext);
         }
 
-        RunProductExportTask::dispatch($task->id)->onQueue(RunProductExportTask::QUEUE_NAME);
+        $this->markTaskCompleted($task->fresh() ?: $task, $filePaths);
 
         return [
             'success' => true,
-            'message' => '导出任务分片已写入，等待下一批继续处理',
+            'message' => '导出任务已完成',
             'skipped' => false,
         ];
     }
@@ -278,23 +248,16 @@ class ProductExportService
         return Team::where('admin_user_id', $user->id)->exists();
     }
 
-    private function createCsvFile(int $taskId, int $partIndex): string
+    private function createEmptyXlsxFile(int $taskId, int $partIndex): string
     {
-        $relativePath = sprintf('exports/product-exports/task-%d/part_%03d.csv', $taskId, $partIndex);
+        $relativePath = sprintf('exports/product-exports/task-%d/part_%03d.xlsx', $taskId, $partIndex);
         Storage::disk('local')->makeDirectory(dirname($relativePath));
 
-        $handle = fopen($this->absoluteStoragePath($relativePath), 'wb');
-        if ($handle === false) {
-            throw new \RuntimeException('无法创建导出文件');
-        }
+        $absolutePath = $this->absoluteStoragePath($relativePath);
+        @unlink($absolutePath);
 
-        try {
-            fwrite($handle, "\xEF\xBB\xBF");
-            foreach ($this->productExportHeaderRows() as $headerRow) {
-                fputcsv($handle, $headerRow);
-            }
-        } finally {
-            fclose($handle);
+        if (!@copy($this->productExportTemplatePath(), $absolutePath)) {
+            throw new \RuntimeException('无法复制商品导出模板文件');
         }
 
         return $relativePath;
@@ -303,14 +266,12 @@ class ProductExportService
     private function markTaskCompleted(ProductExportTask $task, array $filePaths): void
     {
         if (empty($filePaths)) {
-            $filePaths[] = $this->createCsvFile($task->id, 1);
+            $filePaths[] = $this->createEmptyXlsxFile($task->id, 1);
         }
 
-        $xlsxFilePaths = $this->convertCsvPartsToStyledXlsx($task->id, $filePaths);
-
-        $finalRelativePath = count($xlsxFilePaths) > 1
-            ? $this->buildZipArchive($task->id, $xlsxFilePaths)
-            : $xlsxFilePaths[0];
+        $finalRelativePath = count($filePaths) > 1
+            ? $this->buildZipArchive($task->id, $filePaths)
+            : $filePaths[0];
 
         $absolutePath = $this->absoluteStoragePath($finalRelativePath);
         $extension = strtolower((string) pathinfo($finalRelativePath, PATHINFO_EXTENSION));
@@ -331,7 +292,7 @@ class ProductExportService
             'finished_at' => now(),
             'expires_at' => now()->addDays(self::FILE_EXPIRES_DAYS),
             'details' => array_merge(is_array($task->details) ? $task->details : [], [
-                'file_paths' => array_values($xlsxFilePaths),
+                'file_paths' => array_values($filePaths),
                 'download_path' => $finalRelativePath,
                 'export_profile' => self::EXPORT_PROFILE,
             ]),
@@ -371,6 +332,8 @@ class ProductExportService
 
     private function markTaskFailed(ProductExportTask $task, string $message): array
     {
+        Storage::disk('local')->deleteDirectory(sprintf('exports/product-exports/task-%d', $task->id));
+
         $task->fill([
             'status' => 'failed',
             'progress' => 100,
@@ -400,294 +363,323 @@ class ProductExportService
         return Storage::disk('local')->path(ltrim($relativePath, '/'));
     }
 
-    private function convertCsvPartsToStyledXlsx(int $taskId, array $csvFilePaths): array
+    private function resetInterruptedStreamState(ProductExportTask $task, array $details): void
     {
-        $xlsxFilePaths = [];
+        $hasPartialState = (int) $task->processed_rows > 0
+            || (int) ($details['last_id'] ?? 0) > 0
+            || !empty((array) ($details['file_paths'] ?? []));
 
-        foreach (array_values($csvFilePaths) as $index => $csvFilePath) {
-            $xlsxFilePaths[] = $this->convertCsvPartToStyledXlsx($taskId, $csvFilePath, $index + 1);
+        if (!$hasPartialState) {
+            return;
         }
 
-        return $xlsxFilePaths;
+        Storage::disk('local')->deleteDirectory(sprintf('exports/product-exports/task-%d', $task->id));
+
+        $task->fill([
+            'processed_rows' => 0,
+            'progress' => 0,
+            'message' => '检测到中断的导出任务，已从头重新生成',
+            'details' => [
+                'last_id' => 0,
+                'current_part_index' => 1,
+                'rows_in_current_file' => 0,
+                'file_paths' => [],
+            ],
+            'file_name' => null,
+            'file_path' => null,
+            'mime_type' => null,
+            'file_size' => null,
+            'finished_at' => null,
+            'expires_at' => null,
+        ]);
+        $task->save();
     }
 
-    private function convertCsvPartToStyledXlsx(int $taskId, string $csvFilePath, int $partIndex): string
+    private function startTemplatePartContext(int $taskId, int $partIndex): array
     {
-        $csvAbsolutePath = $this->absoluteStoragePath($csvFilePath);
-        if (!is_file($csvAbsolutePath)) {
-            throw new \RuntimeException('导出分片文件不存在，无法生成 Excel');
+        $relativePath = sprintf('exports/product-exports/task-%d/part_%03d.xlsx', $taskId, $partIndex);
+        $rowsTempRelativePath = sprintf('exports/product-exports/task-%d/part_%03d.rows.xml.tmp', $taskId, $partIndex);
+        $directory = dirname($relativePath);
+
+        Storage::disk('local')->makeDirectory($directory);
+
+        $rowsTempAbsolutePath = $this->absoluteStoragePath($rowsTempRelativePath);
+        @unlink($rowsTempAbsolutePath);
+
+        $rowsHandle = fopen($rowsTempAbsolutePath, 'wb');
+        if ($rowsHandle === false) {
+            throw new \RuntimeException('无法创建导出临时数据文件');
         }
 
-        $relativePath = sprintf('exports/product-exports/task-%d/part_%03d.xlsx', $taskId, $partIndex);
-        Storage::disk('local')->makeDirectory(dirname($relativePath));
+        return [
+            'task_id' => $taskId,
+            'part_index' => $partIndex,
+            'relative_path' => $relativePath,
+            'rows_temp_absolute_path' => $rowsTempAbsolutePath,
+            'rows_handle' => $rowsHandle,
+            'data_row_count' => 0,
+        ];
+    }
 
-        $spreadsheet = $this->loadExportTemplateSpreadsheet();
-        $sheet = $spreadsheet->getActiveSheet();
-        $rowNumber = 4;
-        $handle = fopen($csvAbsolutePath, 'rb');
+    private function appendProductExportRowXml(array &$context, Product $product): void
+    {
+        $rowNumber = $this->productExportTemplateHeaderRowCount() + 1 + (int) $context['data_row_count'];
+        $rowXml = $this->buildProductExportWorksheetRowXml($rowNumber, $this->buildProductExportRow($product));
 
-        if ($handle === false) {
-            $spreadsheet->disconnectWorksheets();
-            unset($spreadsheet);
-            throw new \RuntimeException('无法读取导出分片文件');
+        if (fwrite($context['rows_handle'], $rowXml) === false) {
+            throw new \RuntimeException('写入导出数据行失败');
+        }
+
+        $context['data_row_count'] = (int) $context['data_row_count'] + 1;
+    }
+
+    private function finalizeTemplatePartContext(array &$context): string
+    {
+        if (isset($context['rows_handle']) && is_resource($context['rows_handle'])) {
+            fclose($context['rows_handle']);
+            $context['rows_handle'] = null;
+        }
+
+        $sheetXmlAbsolutePath = $this->writeTemplateWorksheetXml($context);
+        $targetAbsolutePath = $this->absoluteStoragePath($context['relative_path']);
+
+        @unlink($targetAbsolutePath);
+        if (!@copy($this->productExportTemplatePath(), $targetAbsolutePath)) {
+            throw new \RuntimeException('无法复制商品导出模板文件');
+        }
+
+        $zip = new ZipArchive();
+        $openResult = $zip->open($targetAbsolutePath);
+        if ($openResult !== true) {
+            throw new \RuntimeException('无法打开导出 Excel 文件');
         }
 
         try {
-            $lineNumber = 0;
-            while (($row = fgetcsv($handle)) !== false) {
-                $lineNumber++;
-                if ($lineNumber <= 3) {
-                    continue;
-                }
+            if (!$zip->deleteName('xl/worksheets/sheet1.xml')) {
+                throw new \RuntimeException('无法替换商品导出模板工作表');
+            }
 
-                $sheet->fromArray([
-                    array_slice(array_pad($row, 56, ''), 0, 56),
-                ], null, 'A' . $rowNumber, true);
-                $rowNumber++;
+            if (!$zip->addFile($sheetXmlAbsolutePath, 'xl/worksheets/sheet1.xml')) {
+                throw new \RuntimeException('无法写入商品导出工作表内容');
             }
         } finally {
-            fclose($handle);
+            $zip->close();
+            @unlink($sheetXmlAbsolutePath);
+            @unlink($context['rows_temp_absolute_path']);
         }
 
-        $writer = new Xlsx($spreadsheet);
-        $writer->setPreCalculateFormulas(false);
-        $writer->save($this->absoluteStoragePath($relativePath));
-
-        $spreadsheet->disconnectWorksheets();
-        unset($spreadsheet);
-
-        @unlink($csvAbsolutePath);
-
-        return $relativePath;
+        return $context['relative_path'];
     }
 
-    private function loadExportTemplateSpreadsheet(): Spreadsheet
+    private function discardTemplatePartContext(array $context): void
     {
-        $templatePath = $this->productExportTemplatePath();
-
-        if (is_file($templatePath)) {
-            $spreadsheet = IOFactory::load($templatePath);
-            $sheet = $spreadsheet->getActiveSheet();
-            $highestRow = max(
-                (int) $sheet->getHighestDataRow(),
-                (int) $sheet->getHighestRow()
-            );
-
-            if ($highestRow > 3) {
-                $sheet->removeRow(4, $highestRow - 3);
-            }
-
-            return $spreadsheet;
+        if (isset($context['rows_handle']) && is_resource($context['rows_handle'])) {
+            fclose($context['rows_handle']);
         }
 
-        return $this->buildStyledSpreadsheet();
+        if (!empty($context['rows_temp_absolute_path'])) {
+            @unlink($context['rows_temp_absolute_path']);
+        }
+    }
+
+    private function writeTemplateWorksheetXml(array $context): string
+    {
+        $sheetXmlRelativePath = sprintf(
+            'exports/product-exports/task-%d/part_%03d.sheet1.xml.tmp',
+            $context['task_id'],
+            $context['part_index']
+        );
+        $sheetXmlAbsolutePath = $this->absoluteStoragePath($sheetXmlRelativePath);
+        @unlink($sheetXmlAbsolutePath);
+
+        $sheetHandle = fopen($sheetXmlAbsolutePath, 'wb');
+        if ($sheetHandle === false) {
+            throw new \RuntimeException('无法创建商品导出工作表临时文件');
+        }
+
+        $templateParts = $this->productExportTemplateSheetParts();
+        $prefix = preg_replace(
+            '/(<dimension[^>]*ref=")[^"]*(")/',
+            '$1' . $this->buildTemplateDimensionRef((int) $context['data_row_count']) . '$2',
+            $templateParts['sheet_prefix'],
+            1
+        );
+
+        if (!is_string($prefix)) {
+            fclose($sheetHandle);
+            throw new \RuntimeException('无法更新商品导出模板维度');
+        }
+
+        try {
+            fwrite($sheetHandle, $prefix);
+
+            $rowsHandle = fopen($context['rows_temp_absolute_path'], 'rb');
+            if ($rowsHandle === false) {
+                throw new \RuntimeException('无法读取导出临时数据文件');
+            }
+
+            try {
+                stream_copy_to_stream($rowsHandle, $sheetHandle);
+            } finally {
+                fclose($rowsHandle);
+            }
+
+            fwrite($sheetHandle, $templateParts['sheet_suffix']);
+        } finally {
+            fclose($sheetHandle);
+        }
+
+        return $sheetXmlAbsolutePath;
+    }
+
+    private function productExportTemplateSheetParts(): array
+    {
+        static $parts = null;
+
+        if ($parts !== null) {
+            return $parts;
+        }
+
+        $zip = new ZipArchive();
+        $openResult = $zip->open($this->productExportTemplatePath());
+        if ($openResult !== true) {
+            throw new \RuntimeException('无法打开商品导出模板文件');
+        }
+
+        try {
+            $sheetXml = $zip->getFromName('xl/worksheets/sheet1.xml');
+        } finally {
+            $zip->close();
+        }
+
+        if (!is_string($sheetXml) || $sheetXml === '') {
+            throw new \RuntimeException('商品导出模板缺少工作表定义');
+        }
+
+        if (!preg_match('/<dimension[^>]*ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"/', $sheetXml, $matches)) {
+            throw new \RuntimeException('无法解析商品导出模板维度');
+        }
+
+        $sheetDataParts = explode('</sheetData>', $sheetXml, 2);
+        if (count($sheetDataParts) !== 2) {
+            throw new \RuntimeException('商品导出模板工作表结构不完整');
+        }
+
+        $parts = [
+            'first_column' => $matches[1],
+            'last_column' => $matches[3],
+            'header_row_count' => (int) $matches[4],
+            'column_count' => $this->columnIndexFromLetters($matches[3]) + 1,
+            'sheet_prefix' => $sheetDataParts[0],
+            'sheet_suffix' => '</sheetData>' . $sheetDataParts[1],
+        ];
+
+        return $parts;
     }
 
     private function productExportTemplatePath(): string
     {
-        return resource_path(self::TEMPLATE_RELATIVE_PATH);
-    }
-
-    private function buildStyledSpreadsheet(): Spreadsheet
-    {
-        $spreadsheet = new Spreadsheet();
-        $sheet = $spreadsheet->getActiveSheet();
-        $sheet->fromArray($this->productExportHeaderRows(), null, 'A1', true);
-
-        foreach ($this->productExportHeaderMerges() as $mergeRange) {
-            $sheet->mergeCells($mergeRange);
+        $templatePath = resource_path(self::TEMPLATE_RELATIVE_PATH);
+        if (!is_file($templatePath)) {
+            throw new \RuntimeException('商品导出模板文件不存在');
         }
 
-        $this->applyProductExportHeaderStyles($sheet);
-        $this->applyProductExportColumnWidths($sheet);
-
-        return $spreadsheet;
+        return $templatePath;
     }
 
-    private function productExportHeaderMerges(): array
+    private function productExportTemplateHeaderRowCount(): int
     {
-        return [
-            'A1:B1',
-            'C1:H1',
-            'I1:N1',
-            'O1:Q1',
-            'R1:AK1',
-            'AL1:AP1',
-            'AQ1:AT1',
-            'AU1:BA1',
-            'BB1:BC1',
-            'C2:D2',
-            'E2:F2',
-        ];
+        return (int) $this->productExportTemplateSheetParts()['header_row_count'];
     }
 
-    private function applyProductExportHeaderStyles($sheet): void
+    private function productExportTemplateColumnCount(): int
     {
-        $sheet->getStyle('A1:BD3')->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
-        $sheet->getStyle('A1:BD3')->getAlignment()->setWrapText(true);
-        $sheet->getStyle('A1:BD3')->getBorders()->getAllBorders()->setBorderStyle('thin');
-
-        $sheet->getStyle('A1:BD1')->applyFromArray([
-            'font' => ['bold' => true, 'size' => 11],
-            'fill' => ['fillType' => 'solid', 'startColor' => ['rgb' => 'F7E7B6']],
-            'alignment' => [
-                'horizontal' => Alignment::HORIZONTAL_CENTER,
-                'vertical' => Alignment::VERTICAL_CENTER,
-            ],
-        ]);
-
-        $sheet->getStyle('A2:BD2')->applyFromArray([
-            'font' => ['size' => 9, 'color' => ['rgb' => '666666']],
-            'fill' => ['fillType' => 'solid', 'startColor' => ['rgb' => 'FFF9E8']],
-            'alignment' => [
-                'horizontal' => Alignment::HORIZONTAL_LEFT,
-                'vertical' => Alignment::VERTICAL_CENTER,
-            ],
-        ]);
-
-        $sheet->getStyle('A3:BD3')->applyFromArray([
-            'font' => ['bold' => true, 'size' => 10],
-            'fill' => ['fillType' => 'solid', 'startColor' => ['rgb' => 'E6F0FF']],
-            'alignment' => [
-                'horizontal' => Alignment::HORIZONTAL_CENTER,
-                'vertical' => Alignment::VERTICAL_CENTER,
-            ],
-        ]);
-
-        $sheet->getRowDimension(1)->setRowHeight(24);
-        $sheet->getRowDimension(2)->setRowHeight(66);
-        $sheet->getRowDimension(3)->setRowHeight(34);
+        return (int) $this->productExportTemplateSheetParts()['column_count'];
     }
 
-    private function applyProductExportColumnWidths($sheet): void
+    private function buildTemplateDimensionRef(int $dataRowCount): string
     {
-        $widths = [
-            'A' => 24, 'B' => 22, 'C' => 30, 'D' => 30, 'E' => 38, 'F' => 38, 'G' => 16, 'H' => 14,
-            'I' => 20, 'J' => 20, 'K' => 20, 'L' => 20, 'M' => 20, 'N' => 20,
-            'O' => 14, 'P' => 18, 'Q' => 12,
-            'R' => 18, 'S' => 16, 'T' => 14, 'U' => 18, 'V' => 16, 'W' => 16, 'X' => 16, 'Y' => 16,
-            'Z' => 18, 'AA' => 18, 'AB' => 18, 'AC' => 18, 'AD' => 18, 'AE' => 16, 'AF' => 18,
-            'AG' => 18, 'AH' => 18, 'AI' => 22, 'AJ' => 18, 'AK' => 16,
-            'AL' => 18, 'AM' => 18, 'AN' => 18, 'AO' => 18, 'AP' => 18,
-            'AQ' => 20, 'AR' => 14, 'AS' => 14, 'AT' => 18,
-            'AU' => 18, 'AV' => 16, 'AW' => 16, 'AX' => 16, 'AY' => 16, 'AZ' => 18,
-            'BA' => 16, 'BB' => 16, 'BC' => 18, 'BD' => 12,
-        ];
+        $templateParts = $this->productExportTemplateSheetParts();
+        $lastRow = $this->productExportTemplateHeaderRowCount() + max(0, $dataRowCount);
 
-        foreach ($widths as $column => $width) {
-            $sheet->getColumnDimension($column)->setWidth($width);
+        return sprintf('%s1:%s%d', $templateParts['first_column'], $templateParts['last_column'], $lastRow);
+    }
+
+    private function buildProductExportWorksheetRowXml(int $rowNumber, array $rowValues): string
+    {
+        $columnCount = $this->productExportTemplateColumnCount();
+        $values = array_slice(array_pad($rowValues, $columnCount, ''), 0, $columnCount);
+        $cellsXml = '';
+
+        foreach ($values as $columnIndex => $value) {
+            $value = (string) $value;
+            if ($value === '') {
+                continue;
+            }
+
+            $cellsXml .= $this->buildProductExportWorksheetCellXml($columnIndex, $rowNumber, $value);
         }
 
-        $sheet->getStyle('A4:BD1048576')->getAlignment()->setVertical(Alignment::VERTICAL_TOP);
-        $sheet->getStyle('C4:F1048576')->getAlignment()->setWrapText(true);
+        return sprintf('<row r="%d" spans="1:%d">%s</row>', $rowNumber, $columnCount, $cellsXml);
     }
 
-    private function productExportHeaderRows(): array
+    private function buildProductExportWorksheetCellXml(int $columnIndex, int $rowNumber, string $value): string
     {
-        return [
-            [
-                '', '', '', '', '', '', '', '',
-                'Product image', '', '', '', '', '',
-                'Prices and stocks', '', '',
-                'Detailed description', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
-                'Any seller\'s attributes', '', '', '', '',
-                "Product variation info (SKU).\nProduct variations sharing the same SPU ID are grouped on one product page", '', '', '',
-                'Packaging and shipment', '', '', '', '', '', '',
-                'Bulk price', '', '',
-            ],
-            [
-                'Do not change it',
-                'Unique SKU ID, barcode or EAN of the product in your system. No more than 50 characters',
-                'At least you should fill in the column in the product language. Unfilled columns will be translated automatically',
-                '',
-                'At least you should fill in the column in the product language. Unfilled columns will be translated automatically',
-                '',
-                'In the drop-down list, select the value',
-                'If product sells in a set, specify the number of products in one set from 1 to 100000',
-                'Link to an image in external data source',
-                'Link to an image in external data source',
-                'Link to an image in external data source',
-                'Link to an image in external data source',
-                'Link to an image in external data source',
-                'Link to an image in external data source',
-                '',
-                '',
-                'Number of products for sale. Only Integer values',
-                '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
-                'Add any attribute. In the row below, specify attribute name (less than 128 symbols), then in the product row, specify the attribute value (less than 128 symbols). Use Cyrillic and Latin characters, punctuation marks and numerals.',
-                'Add any attribute. In the row below, specify attribute name (less than 128 symbols), then in the product row, specify the attribute value (less than 128 symbols). Use Cyrillic and Latin characters, punctuation marks and numerals.',
-                'Add any attribute. In the row below, specify attribute name (less than 128 symbols), then in the product row, specify the attribute value (less than 128 symbols). Use Cyrillic and Latin characters, punctuation marks and numerals.',
-                'Add any attribute. In the row below, specify attribute name (less than 128 symbols), then in the product row, specify the attribute value (less than 128 symbols). Use Cyrillic and Latin characters, punctuation marks and numerals.',
-                'Add any attribute. In the row below, specify attribute name (less than 128 symbols), then in the product row, specify the attribute value (less than 128 symbols). Use Cyrillic and Latin characters, punctuation marks and numerals.',
-                'Link to an image in external data source',
-                '', '', '', '',
-                'from 1 to 30 days. We recommend to use less than 5 days. You should not specify it for products with FBA logistics',
-                'from 0.001 to 500',
-                'from 1 to 700',
-                'from 1 to 700',
-                'from 1 to 700',
-                'In the drop-down list, select the value. View available values or add a new one',
-                '', '', '',
-            ],
-            [
-                'AliExpress product ID (seller SPU ID)*',
-                'SKU ID/Barcode (seller SKU ID)*',
-                'Product name (Russian)',
-                'Product name (English)',
-                'Description (Russian)',
-                'Description (English)',
-                'Selling method*',
-                'Quantity in packaging',
-                'Main image*',
-                'Image #2',
-                'Image #3',
-                'Image #4',
-                'Image #5',
-                'Image #6',
-                'Price, CNY*',
-                'Discounted price, CNY',
-                'Stocks',
-                'Model Number',
-                'Origin',
-                'Gender',
-                'Department Name',
-                'Closure Type',
-                'Pattern Type',
-                'Fit',
-                'Season',
-                'Fashion Element',
-                'Upper Material',
-                'Insole Material',
-                'Outsole Material',
-                'Lining Material',
-                'Heel Height',
-                'Upper fixing method',
-                'Upper coverage',
-                'With metal toe cap',
-                'With or install Professional accessories',
-                'Whether waterproof',
-                'Shoe size (CN)',
-                '',
-                '',
-                '',
-                '',
-                '',
-                'Variation Image',
-                'Shoe Size',
-                'Color',
-                'Сolor name in your system',
-                'Order processing time (days)*',
-                'Weight in packaging (kg)*',
-                'Length in packaging (cm)*',
-                'Width in packaging (cm)*',
-                'Height in packaging (cm)*',
-                'Shipping template*',
-                'Type of logistics',
-                'Bulk discount, %',
-                'Bulk order from, pcs.',
-                '',
-            ],
-        ];
+        $cellReference = $this->columnLettersFromIndex($columnIndex) . $rowNumber;
+
+        if ($this->isProductExportNumericColumn($columnIndex) && is_numeric($value)) {
+            return sprintf('<c r="%s"><v>%s</v></c>', $cellReference, trim($value));
+        }
+
+        return sprintf(
+            '<c r="%s" t="inlineStr"><is><t xml:space="preserve">%s</t></is></c>',
+            $cellReference,
+            $this->sanitizeWorksheetInlineString($value)
+        );
+    }
+
+    private function isProductExportNumericColumn(int $columnIndex): bool
+    {
+        static $numericColumns = null;
+
+        if ($numericColumns === null) {
+            $numericColumns = array_fill_keys([7, 14, 15, 16, 46, 47, 48, 49, 50, 53, 54], true);
+        }
+
+        return isset($numericColumns[$columnIndex]);
+    }
+
+    private function sanitizeWorksheetInlineString(string $value): string
+    {
+        $sanitized = preg_replace('/[^\x09\x0A\x0D\x20-\x{D7FF}\x{E000}-\x{FFFD}]/u', '', $value);
+
+        return htmlspecialchars($sanitized ?? $value, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+    }
+
+    private function columnLettersFromIndex(int $columnIndex): string
+    {
+        $index = $columnIndex + 1;
+        $letters = '';
+
+        while ($index > 0) {
+            $index--;
+            $letters = chr(($index % 26) + 65) . $letters;
+            $index = intdiv($index, 26);
+        }
+
+        return $letters;
+    }
+
+    private function columnIndexFromLetters(string $columnLetters): int
+    {
+        $index = 0;
+        $length = strlen($columnLetters);
+
+        for ($offset = 0; $offset < $length; $offset++) {
+            $index = ($index * 26) + (ord($columnLetters[$offset]) - 64);
+        }
+
+        return $index - 1;
     }
 
     private function buildProductExportRow(Product $product): array

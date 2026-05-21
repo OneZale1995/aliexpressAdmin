@@ -42,7 +42,7 @@
         ],
         "dev": [
             "Composer\\Config::disableProcessTimeout",
-            "npx concurrently -c \"#c4b5fd,#fb7185,#fdba74\" \"php artisan queue:work --queue=orders --tries=3 --timeout=0\" \"php artisan queue:work --queue=products --tries=3 --timeout=0\" \"php artisan queue:work --queue=product-exports --tries=3 --timeout=0\" --names=q-orders,q-products,q-product-exports --kill-others"
+            "npx concurrently -c \"#c4b5fd,#fb7185,#fdba74\" \"php artisan queue:work --queue=orders --tries=3 --timeout=0\" \"php artisan queue:work --queue=products --tries=3 --timeout=0\" \"php -d memory_limit=512M artisan queue:work --queue=product-exports --tries=3 --timeout=0 --memory=512\" --names=q-orders,q-products,q-product-exports --kill-others"
         ],
         "test": [
             "@php artisan config:clear --ansi",

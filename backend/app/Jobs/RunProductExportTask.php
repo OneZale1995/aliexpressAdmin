@@ -30,6 +30,8 @@ class RunProductExportTask implements ShouldQueue
 
     public function handle(ProductExportService $service): void
     {
+        ini_set('memory_limit', '512M');
+
         $service->processTask($this->taskId);
     }
 

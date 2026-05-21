@@ -15,7 +15,7 @@ use ZipArchive;
 
 class ProductExportService
 {
-    private const CHUNK_SIZE = 1000;
+    private const CHUNK_SIZE = 200;
 
     // Stream writing keeps memory flat; this cap now mainly controls file size and download usability.
     private const MAX_ROWS_PER_FILE = 20000;
@@ -138,6 +138,7 @@ class ProductExportService
         try {
             while (true) {
                 $products = $this->buildExportQuery($user, $options)
+                    ->select($this->productExportSelectColumns())
                     ->with('shop:id,name,logistics_route,logistics_template_id,logistics_template_name')
                     ->where('id', '>', $lastProcessedId)
                     ->orderBy('id')
@@ -145,6 +146,7 @@ class ProductExportService
                     ->get();
 
                 if ($products->isEmpty()) {
+                    unset($products);
                     break;
                 }
 
@@ -176,6 +178,9 @@ class ProductExportService
                     ],
                 ]);
                 $task->save();
+
+                unset($product, $products);
+                gc_collect_cycles();
             }
         } finally {
             if (isset($partContext['rows_handle']) && is_resource($partContext['rows_handle'])) {
@@ -223,6 +228,38 @@ class ProductExportService
         }
 
         return $query;
+    }
+
+    private function productExportSelectColumns(): array
+    {
+        return [
+            'id',
+            'shop_id',
+            'ae_item_id',
+            'category_id',
+            'bulk_discount',
+            'bulk_order',
+            'delivery_time',
+            'freight_template_id',
+            'package_height',
+            'package_length',
+            'package_width',
+            'lot_num',
+            'title_en',
+            'title_ru',
+            'main_image_url',
+            'price',
+            'gross_weight',
+            'descriptions',
+            'media',
+            'subjects',
+            'marketing_images',
+            'detail',
+            'mobile_detail',
+            'properties',
+            'skus',
+            'raw_data',
+        ];
     }
 
     private function applyPermissionScope(Builder $query, User $user): void

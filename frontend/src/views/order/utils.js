@@ -267,10 +267,9 @@ export function calcTotalBack(order) {
 export function calcProfit(order) {
   const total = parseFloat(order.total_amount || 0)
   const fee = parseFloat(order.platform_fee || 0) + parseFloat(order.affiliate_fee || 0)
-  const lianlian = parseFloat(order.lianlian_fee || 0)
   const purchase = parseFloat(order.purchase_amount || 0)
   const logistics = parseFloat(order.logistics_fee || 0)
-  return +(total - fee - lianlian - purchase - logistics).toFixed(2)
+  return +(total - fee - purchase - logistics).toFixed(2)
 }
 
 export function calcProfitRate(order) {

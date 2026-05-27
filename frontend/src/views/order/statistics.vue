@@ -390,6 +390,8 @@ export default {
   },
   created() {
     this.loadShops()
+  },
+  activated() {
     this.fetchData()
   },
   methods: {

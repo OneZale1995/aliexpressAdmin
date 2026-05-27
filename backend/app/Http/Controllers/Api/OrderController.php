@@ -331,6 +331,8 @@ class OrderController extends Controller
         $this->applyOrderPermissionScope($query, $request->user());
         $this->applyShopFilter($query, $request);
 
+        $this->applyNonAbandonedOrderFilter($query);
+
         return $query->where('order_display_status', '!=', 'Close');
     }
 
@@ -390,7 +392,7 @@ class OrderController extends Controller
             COALESCE(SUM(logistics_fee), 0) as total_logistics_fee,
             COALESCE(SUM(lianlian_fee), 0) as total_lianlian_fee,
             COALESCE(SUM(platform_fee + affiliate_fee), 0) as total_platform_fee,
-            COALESCE(SUM(total_amount - platform_fee - affiliate_fee - lianlian_fee - purchase_amount - logistics_fee), 0) as total_profit
+            COALESCE(SUM(total_amount - platform_fee - affiliate_fee - purchase_amount - logistics_fee), 0) as total_profit
         ')->first();
 
         $totalItems = (int) DB::table('order_items')
@@ -439,7 +441,7 @@ class OrderController extends Controller
                 COALESCE(SUM(total_amount), 0) as total_sales,
                 COALESCE(SUM(purchase_amount), 0) as total_purchase_cost,
                 COALESCE(SUM(logistics_fee), 0) as total_logistics_fee,
-                COALESCE(SUM(total_amount - platform_fee - affiliate_fee - lianlian_fee - purchase_amount - logistics_fee), 0) as total_profit
+                COALESCE(SUM(total_amount - platform_fee - affiliate_fee - purchase_amount - logistics_fee), 0) as total_profit
             ')
             ->groupBy(DB::raw('DATE(ae_created_at)'))
             ->orderBy('date', 'desc')
@@ -457,11 +459,20 @@ class OrderController extends Controller
                 COALESCE(SUM(total_amount), 0) as total_sales,
                 COALESCE(SUM(purchase_amount), 0) as total_purchase_cost,
                 COALESCE(SUM(logistics_fee), 0) as total_logistics_fee,
-                COALESCE(SUM(total_amount - platform_fee - affiliate_fee - lianlian_fee - purchase_amount - logistics_fee), 0) as total_profit
+                COALESCE(SUM(total_amount - platform_fee - affiliate_fee - purchase_amount - logistics_fee), 0) as total_profit
             ')
             ->groupBy('shops.id', 'shops.name')
             ->orderBy('total_profit', 'desc')
             ->get();
+    }
+
+    protected function applyNonAbandonedOrderFilter($query): void
+    {
+        $query->where(function ($q) {
+            $q->where('backend_status', '!=', 'abandoned')
+              ->orWhereNull('backend_status')
+              ->orWhere('backend_status', '');
+        });
     }
 
     /**
@@ -866,7 +877,6 @@ class OrderController extends Controller
         $profit = (float) $order->total_amount
             - (float) $order->platform_fee
             - (float) $order->affiliate_fee
-            - (float) $order->lianlian_fee
             - (float) $order->purchase_amount
             - (float) $order->logistics_fee;
 

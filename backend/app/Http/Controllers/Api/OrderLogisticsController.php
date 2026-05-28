@@ -616,9 +616,14 @@ class OrderLogisticsController extends Controller
 
         $order = Order::with(['shop', 'items', 'currentLogistics'])->findOrFail($request->id);
         $service = new ChinaPostService($order);
+        $options = $this->normalizeChinaPostOrderOptions($order, $request->except(['id']));
+        if ($message = $this->validateChinaPostOrderOptions($options)) {
+            return $this->error($message);
+        }
+
         $result = $service->previewCreateOrderRequest(
             $order,
-            $this->normalizeChinaPostOrderOptions($order, $request->except(['id']))
+            $options
         );
 
         if (!$result['success']) {
@@ -650,7 +655,11 @@ class OrderLogisticsController extends Controller
         ]);
 
         $order = Order::with(['shop', 'items', 'currentLogistics'])->findOrFail($request->id);
-        $options = $request->except(['id']);
+        $options = $this->normalizeChinaPostOrderOptions($order, $request->except(['id']));
+        if ($message = $this->validateChinaPostOrderOptions($options)) {
+            return $this->error($message);
+        }
+
         $result = $this->createChinaPostOrder($order, $options);
 
         if ($result['success']) {
@@ -1945,15 +1954,123 @@ class OrderLogisticsController extends Controller
             if (empty($options['sender_no']) && !empty($options['logistics_interface']['sender_no'])) {
                 $options['sender_no'] = (string) $options['logistics_interface']['sender_no'];
             }
+
+            if (is_array($options['logistics_interface']['items'] ?? null)) {
+                $options['logistics_interface']['items'] = $this->normalizeChinaPostItemsWithCost(
+                    $options['logistics_interface']['items']
+                );
+            }
+        }
+
+        if (is_array($options['items'] ?? null)) {
+            $options['items'] = $this->normalizeChinaPostItemsWithCost($options['items']);
         }
 
         return $options;
+    }
+
+    private function validateChinaPostOrderOptions(array $options = []): ?string
+    {
+        $items = null;
+        if (is_array($options['logistics_interface']['items'] ?? null)) {
+            $items = $options['logistics_interface']['items'];
+        } elseif (is_array($options['items'] ?? null)) {
+            $items = $options['items'];
+        }
+
+        if (!is_array($items) || empty($items)) {
+            return null;
+        }
+
+        $errors = [];
+
+        foreach ($items as $index => $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $line = $index + 1;
+
+            $cargoTypeName = trim((string) ($item['cargo_type_name'] ?? $item['cargo_name'] ?? ''));
+            $cargoTypeNameEn = trim((string) ($item['cargo_type_name_en'] ?? $item['cargo_name_en'] ?? ''));
+
+            if ($cargoTypeName !== '' && mb_strlen($cargoTypeName) > 50) {
+                $errors[] = '第' . $line . '行商品类型名称（中文）长度不能超过50';
+            }
+
+            if ($cargoTypeNameEn !== '' && mb_strlen($cargoTypeNameEn) > 50) {
+                $errors[] = '第' . $line . '行商品类型名称（英文）长度不能超过50';
+            }
+
+            $declaredValue = $item['cargo_value'] ?? null;
+            if (is_string($declaredValue)) {
+                $declaredValue = trim($declaredValue);
+            }
+
+            if ($declaredValue === null || $declaredValue === '') {
+                $errors[] = '第' . $line . '行商品单价不能为空';
+                continue;
+            }
+
+            if (!is_numeric($declaredValue) || (float) $declaredValue <= 0) {
+                $errors[] = '第' . $line . '行商品单价必须大于0';
+            }
+        }
+
+        if (!empty($errors)) {
+            return implode('；', $errors);
+        }
+
+        return null;
+    }
+
+    private function normalizeChinaPostItemsWithCost(array $items): array
+    {
+        return array_map(static function ($item) {
+            if (!is_array($item)) {
+                return $item;
+            }
+
+            $declaredValue = trim((string) ($item['cargo_value'] ?? ''));
+            $cost = trim((string) ($item['cost'] ?? ''));
+            $cargoNameEn = trim((string) ($item['cargo_name_en'] ?? ''));
+            $cargoName = trim((string) ($item['cargo_name'] ?? ''));
+            $cargoTypeNameEn = trim((string) ($item['cargo_type_name_en'] ?? ''));
+            $cargoTypeName = trim((string) ($item['cargo_type_name'] ?? ''));
+            $cargoDescription = trim((string) ($item['cargo_description'] ?? ''));
+
+            if ($declaredValue !== '' && $cost === '') {
+                $item['cost'] = $declaredValue;
+            }
+
+            if ($cargoDescription === '') {
+                $fallbackDescription = $cargoNameEn !== ''
+                    ? $cargoNameEn
+                    : ($cargoName !== ''
+                        ? $cargoName
+                        : ($cargoTypeNameEn !== ''
+                            ? $cargoTypeNameEn
+                            : ($cargoTypeName !== '' ? $cargoTypeName : 'Product')));
+
+                $item['cargo_description'] = mb_substr($fallbackDescription, 0, 200);
+            }
+
+            return $item;
+        }, $items);
     }
 
     private function createChinaPostOrder(Order $order, array $options = []): array
     {
         $service = new ChinaPostService($order);
         $options = $this->normalizeChinaPostOrderOptions($order, $options);
+
+        if ($message = $this->validateChinaPostOrderOptions($options)) {
+            return [
+                'success' => false,
+                'message' => $message,
+                'provider_result' => [],
+            ];
+        }
 
         $result = $service->createOrder($order, $options);
 

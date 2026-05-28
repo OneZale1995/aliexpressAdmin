@@ -787,7 +787,6 @@ class ChinaPostService
                 'cost' => round($price, 2),
                 'cargo_currency' => 'USD',
                 'carogo_weight' => $weight,
-                'cargo_weight' => $weight,
                 'cargo_description' => mb_substr($itemNameEn, 0, 200),
                 'cargo_serial' => '',
                 'unit' => (string) $this->public('item_unit', '个'),

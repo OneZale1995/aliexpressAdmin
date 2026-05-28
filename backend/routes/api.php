@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BootstrapController;
 use App\Http\Controllers\Api\CustomsProductController;
 use App\Http\Controllers\Api\DictController;
 use App\Http\Controllers\Api\ExportController;
@@ -28,6 +29,7 @@ Route::post('/user/login', [AuthController::class, 'login']);
 
 // 需要认证的接口
 Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
+    Route::post('/bootstrap/context', [BootstrapController::class, 'context']);
     Route::post('/user/info', [AuthController::class, 'info']);
     Route::post('/user/logout', [AuthController::class, 'logout']);
 

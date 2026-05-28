@@ -5,7 +5,6 @@ import NProgress from 'nprogress' // progress bar
 import 'nprogress/nprogress.css' // progress bar style
 import { getToken } from '@/utils/auth' // get token from cookie
 import getPageTitle from '@/utils/get-page-title'
-import { fetchLogisticsConfigCurrent } from '@/api/system'
 
 NProgress.configure({ showSpinner: false }) // NProgress Configuration
 
@@ -38,13 +37,7 @@ router.beforeEach(async(to, from, next) => {
           const { roles } = await store.dispatch('user/getInfo')
 
           // 获取物流配置开关，用于控制物流配置菜单可见性
-          try {
-            const switchRes = await fetchLogisticsConfigCurrent()
-            const switches = (switchRes && switchRes.data && switchRes.data.switches) || {}
-            store.commit('permission/SET_LOGISTICS_SWITCHES', switches)
-          } catch (e) {
-            store.commit('permission/SET_LOGISTICS_SWITCHES', {})
-          }
+          await store.dispatch('permission/loadLogisticsSwitches')
 
           // generate accessible routes map based on roles
           const accessRoutes = await store.dispatch('permission/generateRoutes', roles)

@@ -15,6 +15,13 @@ export function getInfo() {
   })
 }
 
+export function getBootstrapContext() {
+  return request({
+    url: '/bootstrap/context',
+    method: 'post'
+  })
+}
+
 export function logout() {
   return request({
     url: '/user/logout',

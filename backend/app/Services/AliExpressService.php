@@ -1479,9 +1479,9 @@ class AliExpressService
                 'Content-Type' => 'application/json',
             ])
                 ->withOptions(['verify' => $this->verifySsl])
-                ->connectTimeout(5)
-                ->timeout(12)
-                ->retry(1, 500, function (\Throwable $e) {
+                ->connectTimeout(10)
+                ->timeout(15)
+                ->retry(2, 1000, function (\Throwable $e) {
                     return $this->isTransientNetworkError($e);
                 })
                 ->post($this->baseUrl . '/api/v1/product/get-seller-product', [

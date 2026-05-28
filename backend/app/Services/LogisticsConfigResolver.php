@@ -132,6 +132,32 @@ class LogisticsConfigResolver
         return $sanitized;
     }
 
+    public function buildConfigRef(Order $order, string $provider): array
+    {
+        $resolved = $this->resolveForOrder($order, $provider);
+        $config = $resolved['config'] ?? [];
+
+        return [
+            'source' => $resolved['source'] ?? 'system',
+            'config' => $this->sanitizeProviderConfig($provider, $config),
+            'frozen_at' => now()->toDateTimeString(),
+        ];
+    }
+
+    public function resolveFromConfigRef(?array $configRef): ?array
+    {
+        if (!is_array($configRef)) {
+            return null;
+        }
+
+        $config = $configRef['config'] ?? null;
+        if (!is_array($config) || empty($config)) {
+            return null;
+        }
+
+        return $config;
+    }
+
     private function mergeNonEmpty(array $base, array $overlay): array
     {
         foreach ($overlay as $key => $value) {

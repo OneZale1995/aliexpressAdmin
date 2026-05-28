@@ -11,8 +11,12 @@ class LogOperation
 {
     // 不记录的路由
     protected array $except = [
+        'api/bootstrap/context',
         'api/user/info',
         'api/user/login',
+        'api/menus/list',
+        'api/system-configs/list',
+        'api/logistics-configs/current',
         'api/operation-logs/*',
         'api/login-logs/*',
         'api/export',

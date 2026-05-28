@@ -26,7 +26,22 @@
       "Bash(npm run *)",
       "PowerShell(git *)",
       "Bash(Get-Content composer.json)",
-      "Bash(Select-Object -Index 46)"
+      "Bash(Select-Object -Index 46)",
+      "Bash(composer update *)",
+      "Bash(composer require *)",
+      "Bash(where.exe composer *)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(composer *)",
+      "PowerShell(composer require *)",
+      "PowerShell($php = \"D:\\\\developTools\\\\phpstudy_pro\\\\Extensions\\\\php\\\\php8.2.9nts\\\\php.exe\"; & $php -r \"echo PHP_VERSION;\")",
+      "PowerShell($php = \"D:\\\\developTools\\\\phpstudy_pro\\\\Extensions\\\\php\\\\php8.2.9nts\\\\php.exe\"; $composer = \"D:\\\\developTools\\\\phpstudy_pro\\\\Extensions\\\\composer1.8.5\\\\composer.phar\"; Set-Location \"D:\\\\developTools\\\\phpstudy_pro\\\\WWW\\\\aliexpressAdmin\\\\backend\"; & $php $composer require openspout/openspout)",
+      "PowerShell($php = \"D:\\\\developTools\\\\phpstudy_pro\\\\Extensions\\\\php\\\\php8.2.9nts\\\\php.exe\"; & $php -l \"D:\\\\developTools\\\\phpstudy_pro\\\\WWW\\\\aliexpressAdmin\\\\backend\\\\app\\\\Services\\\\ProductExportService.php\")",
+      "PowerShell($php = \"D:\\\\developTools\\\\phpstudy_pro\\\\Extensions\\\\php\\\\php8.2.9nts\\\\php.exe\"; & $php -r \"echo 'memory_limit = ' . ini_get\\('memory_limit'\\) . PHP_EOL;\")",
+      "Bash(GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false push)",
+      "Bash(Get-ChildItem -Path \"D:\\\\developTools\\\\phpstudy_pro\\\\WWW\\\\aliexpressAdmin\" -Directory -Depth 1)",
+      "PowerShell(php artisan migrate --path=database/migrations/2026_05_17_000000_create_order_blacklists_table.php)",
+      "Bash(composer show *)",
+      "Bash(Select-String -Pattern \"spout|spreadsheet|phpoffice\")"
     ]
   }
 }

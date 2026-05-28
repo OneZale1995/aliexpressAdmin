@@ -325,6 +325,17 @@ export default {
       })
     },
     loadFinanceConfigs() {
+      const bootstrap = this.$store && this.$store.getters ? (this.$store.getters.bootstrap || {}) : {}
+      const bootstrapConfigs = Array.isArray(bootstrap.system_configs) ? bootstrap.system_configs : []
+      if (bootstrapConfigs.length) {
+        const rateConfig = bootstrapConfigs.find(item => item.key === 'estimated_receipt_rate')
+        const parsedRate = Number(rateConfig ? rateConfig.value : '')
+        if (!Number.isNaN(parsedRate) && parsedRate > 0) {
+          this.estimatedReceiptRate = parsedRate
+          return
+        }
+      }
+
       fetchConfigList({ group: 'finance' }).then(res => {
         const configs = res.data || []
         const rateConfig = configs.find(item => item.key === 'estimated_receipt_rate')

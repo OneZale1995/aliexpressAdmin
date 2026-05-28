@@ -1,4 +1,4 @@
-import { login, logout, getInfo } from '@/api/user'
+import { login, logout, getInfo, getBootstrapContext } from '@/api/user'
 import { getToken, setToken, removeToken } from '@/utils/auth'
 import router, { resetRouter } from '@/router'
 
@@ -7,7 +7,13 @@ const state = {
   name: '',
   avatar: '',
   introduction: '',
-  roles: []
+  roles: [],
+  permissions: [],
+  bootstrap: {
+    menus: [],
+    logistics_switches: {},
+    system_configs: []
+  }
 }
 
 const mutations = {
@@ -25,6 +31,18 @@ const mutations = {
   },
   SET_ROLES: (state, roles) => {
     state.roles = roles
+  },
+  SET_PERMISSIONS: (state, permissions) => {
+    state.permissions = permissions
+  },
+  SET_BOOTSTRAP: (state, bootstrap) => {
+    state.bootstrap = {
+      menus: Array.isArray(bootstrap.menus) ? bootstrap.menus : [],
+      logistics_switches: bootstrap.logistics_switches && typeof bootstrap.logistics_switches === 'object'
+        ? bootstrap.logistics_switches
+        : {},
+      system_configs: Array.isArray(bootstrap.system_configs) ? bootstrap.system_configs : []
+    }
   }
 }
 
@@ -47,14 +65,20 @@ const actions = {
   // get user info
   getInfo({ commit, state }) {
     return new Promise((resolve, reject) => {
-      getInfo().then(response => {
-        const { data } = response
+      getBootstrapContext().then(response => {
+        const payload = response.data || {}
+        const data = payload.user || payload
+        const bootstrap = {
+          menus: payload.menus || [],
+          logistics_switches: payload.logistics_switches || {},
+          system_configs: payload.system_configs || []
+        }
 
         if (!data) {
           reject('Verification failed, please Login again.')
         }
 
-        const { roles, name, avatar, introduction } = data
+        const { roles, permissions, name, avatar, introduction } = data
 
         // roles must be a non-empty array
         if (!roles || roles.length <= 0) {
@@ -62,12 +86,36 @@ const actions = {
         }
 
         commit('SET_ROLES', roles)
+        commit('SET_PERMISSIONS', Array.isArray(permissions) ? permissions.map(permission => permission.name || permission).filter(Boolean) : [])
         commit('SET_NAME', name)
         commit('SET_AVATAR', avatar)
         commit('SET_INTRODUCTION', introduction)
+        commit('SET_BOOTSTRAP', bootstrap)
         resolve(data)
-      }).catch(error => {
-        reject(error)
+      }).catch(() => {
+        getInfo().then(response => {
+          const { data } = response
+
+          if (!data) {
+            reject('Verification failed, please Login again.')
+          }
+
+          const { roles, permissions, name, avatar, introduction } = data
+
+          if (!roles || roles.length <= 0) {
+            reject('getInfo: roles must be a non-null array!')
+          }
+
+          commit('SET_ROLES', roles)
+          commit('SET_PERMISSIONS', Array.isArray(permissions) ? permissions.map(permission => permission.name || permission).filter(Boolean) : [])
+          commit('SET_NAME', name)
+          commit('SET_AVATAR', avatar)
+          commit('SET_INTRODUCTION', introduction)
+          commit('SET_BOOTSTRAP', { menus: [], logistics_switches: {}, system_configs: [] })
+          resolve(data)
+        }).catch(error => {
+          reject(error)
+        })
       })
     })
   },
@@ -78,6 +126,8 @@ const actions = {
       logout(state.token).then(() => {
         commit('SET_TOKEN', '')
         commit('SET_ROLES', [])
+        commit('SET_PERMISSIONS', [])
+        commit('SET_BOOTSTRAP', { menus: [], logistics_switches: {}, system_configs: [] })
         removeToken()
         resetRouter()
 
@@ -97,6 +147,8 @@ const actions = {
     return new Promise(resolve => {
       commit('SET_TOKEN', '')
       commit('SET_ROLES', [])
+      commit('SET_PERMISSIONS', [])
+      commit('SET_BOOTSTRAP', { menus: [], logistics_switches: {}, system_configs: [] })
       removeToken()
       resolve()
     })

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Order;
+use App\Models\Product;
 use App\Services\LogisticsConfigResolver;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -24,13 +25,20 @@ class ChinaPostService
     // 默认寄件人信息
     protected array $defaultSender;
 
-    public function __construct(?Order $order = null)
+    public function __construct(?Order $order = null, ?array $configRef = null)
     {
         $config = config('services.chinapost', []);
         $sys = SystemConfig::getByGroup('chinapost');
         $resolver = new LogisticsConfigResolver();
-        $resolved = $resolver->resolveForOrder($order, LogisticsConfigResolver::PROVIDER_CHINAPOST);
-        $scopeConfig = is_array($resolved['config'] ?? null) ? $resolved['config'] : [];
+
+        $frozenConfig = $resolver->resolveFromConfigRef($configRef);
+
+        if ($frozenConfig !== null) {
+            $scopeConfig = $frozenConfig;
+        } else {
+            $resolved = $resolver->resolveForOrder($order, LogisticsConfigResolver::PROVIDER_CHINAPOST);
+            $scopeConfig = is_array($resolved['config'] ?? null) ? $resolved['config'] : [];
+        }
 
         $sys = $this->mergeScopeConfigToSystemConfig($sys, $scopeConfig);
 
@@ -724,9 +732,29 @@ class ChinaPostService
     protected function buildOrderPayload(Order $order, string $bizProductNo, array $options = []): array
     {
         $items = $order->items ?? collect();
+        $providedItems = is_array($options['items'] ?? null) ? array_values($options['items']) : null;
+        $hasProvidedItems = $providedItems !== null;
         $totalWeight = 0;
         $totalValue = 0;
         $cargoItems = [];
+
+        $productCategoryMap = [];
+        $shopId = (int) ($order->shop_id ?? 0);
+        $aeItemIds = $items
+            ->pluck('ae_item_id')
+            ->filter(fn ($id) => $id !== null && $id !== '')
+            ->map(fn ($id) => (string) $id)
+            ->unique()
+            ->values();
+
+        if (!$hasProvidedItems && $shopId > 0 && $aeItemIds->isNotEmpty()) {
+            $productCategoryMap = Product::query()
+                ->where('shop_id', $shopId)
+                ->whereIn('ae_item_id', $aeItemIds->all())
+                ->pluck('category_name', 'ae_item_id')
+                ->map(fn ($name) => (string) $name)
+                ->toArray();
+        }
 
         foreach ($items as $index => $item) {
             $qty = max(1, (int) ($item->quantity ?? 1));
@@ -736,12 +764,22 @@ class ChinaPostService
             $totalWeight += $weight * $qty;
             $totalValue += $price * $qty;
 
+            if ($hasProvidedItems) {
+                continue;
+            }
+
+            $itemName = (string) ($item->name ?: '商品');
+            $itemNameEn = (string) ($item->name ?: 'Product');
+            $categoryName = (string) ($productCategoryMap[(string) ($item->ae_item_id ?? '')] ?? '');
+            $cargoTypeName = $categoryName !== '' ? $categoryName : $itemName;
+            $cargoTypeNameEn = $categoryName !== '' ? $categoryName : $itemNameEn;
+
             $cargoItems[] = [
                 'cargo_no' => (string) ($item->sku_code ?: $item->ae_sku_id ?: ($index + 1)),
-                'cargo_name' => mb_substr($item->name ?: '商品', 0, 50),
-                'cargo_name_en' => mb_substr($item->name ?: 'Product', 0, 50),
-                'cargo_type_name' => mb_substr($item->name ?: '商品', 0, 50),
-                'cargo_type_name_en' => mb_substr($item->name ?: 'Product', 0, 50),
+                'cargo_name' => mb_substr($itemName, 0, 50),
+                'cargo_name_en' => mb_substr($itemNameEn, 0, 50),
+                'cargo_type_name' => mb_substr($cargoTypeName, 0, 50),
+                'cargo_type_name_en' => mb_substr($cargoTypeNameEn, 0, 50),
                 'cargo_origin_name' => 'CN',
                 'cargo_link' => '',
                 'cargo_quantity' => $qty,
@@ -750,7 +788,7 @@ class ChinaPostService
                 'cargo_currency' => 'USD',
                 'carogo_weight' => $weight,
                 'cargo_weight' => $weight,
-                'cargo_description' => mb_substr($item->name ?: 'Product', 0, 200),
+                'cargo_description' => mb_substr($itemNameEn, 0, 200),
                 'cargo_serial' => '',
                 'unit' => (string) $this->public('item_unit', '个'),
                 'intemsize' => '',
@@ -758,7 +796,7 @@ class ChinaPostService
         }
 
         // 如果没有订单项，创建一个占位项
-        if (empty($cargoItems)) {
+        if (!$hasProvidedItems && empty($cargoItems)) {
             $totalWeight = (int) ($options['weight'] ?? 100);
             $totalValue = (float) ($order->total_amount ?? 1);
             $cargoItems[] = [
@@ -873,14 +911,21 @@ class ChinaPostService
             'pickup_flag' => (string) ($options['pickup_flag'] ?? '0'),
             'sender' => $sender,
             'receiver' => $receiver,
-            'items' => is_array($options['items'] ?? null) ? $options['items'] : $cargoItems,
+            'items' => $hasProvidedItems ? $providedItems : $cargoItems,
         ];
     }
 
     protected function buildPayloadFromGivenLogisticsInterface(Order $order, string $bizProductNo, array $options = []): array
     {
-        $defaultPayload = $this->buildOrderPayload($order, $bizProductNo, $options);
+        $baseOptions = $options;
+        if (is_array($options['logistics_interface']['items'] ?? null)) {
+            $baseOptions['items'] = $options['logistics_interface']['items'];
+        }
+
+        $defaultPayload = $this->buildOrderPayload($order, $bizProductNo, $baseOptions);
         $payload = array_replace_recursive($defaultPayload, $options['logistics_interface']);
+        $hasUserSelectedItems = is_array($options['logistics_interface']['items'] ?? null)
+            && !empty($options['logistics_interface']['items']);
 
         $payload['created_time'] = (string) ($payload['created_time'] ?? now()->format('Y-m-d H:i:s'));
         $payload['sender_no'] = (string) ($payload['sender_no'] ?? $this->ecCompanyId);
@@ -893,6 +938,26 @@ class ChinaPostService
         $payload['items'] = is_array($payload['items'] ?? null) && !empty($payload['items'])
             ? array_values($payload['items'])
             : ($defaultPayload['items'] ?? []);
+
+        if ($hasUserSelectedItems) {
+            $payload['items'] = array_map(static function ($item) {
+                if (!is_array($item)) {
+                    return $item;
+                }
+
+                $cargoName = trim((string) ($item['cargo_name'] ?? ''));
+                $cargoNameEn = trim((string) ($item['cargo_name_en'] ?? ''));
+
+                if ($cargoName !== '') {
+                    $item['cargo_type_name'] = $cargoName;
+                }
+                if ($cargoNameEn !== '') {
+                    $item['cargo_type_name_en'] = $cargoNameEn;
+                }
+
+                return $item;
+            }, $payload['items']);
+        }
 
         return $payload;
     }

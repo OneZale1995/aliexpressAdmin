@@ -12,6 +12,7 @@ use App\Models\Shop;
 use App\Models\Team;
 use App\Services\AliExpressService;
 use App\Services\ChinaPostService;
+use App\Services\LogisticsConfigResolver;
 use App\Services\OrderFbsWorkflowService;
 use App\Services\OrderLogisticsService;
 use App\Services\Sz56tService;
@@ -705,13 +706,14 @@ class OrderLogisticsController extends Controller
             'page_type' => 'nullable|in:RM,A4',
         ]);
 
-        $order = Order::findOrFail($request->id);
+        $order = Order::with('currentLogistics')->findOrFail($request->id);
 
         if (empty($order->tracking_number)) {
             return $this->error('该订单暂无运单号，请先创建邮政订单');
         }
 
-        $service = new ChinaPostService($order);
+        $configRef = data_get($order, 'currentLogistics.payload.chinapost.config_ref');
+        $service = new ChinaPostService($order, $configRef);
         $result = $service->getLabel(
             $order->tracking_number,
             $request->input('page_type', 'RM')
@@ -744,13 +746,14 @@ class OrderLogisticsController extends Controller
             'id' => 'required|exists:orders,id',
         ]);
 
-        $order = Order::findOrFail($request->id);
+        $order = Order::with('currentLogistics')->findOrFail($request->id);
 
         if (empty($order->tracking_number)) {
             return $this->error('该订单暂无运单号');
         }
 
-        $service = new ChinaPostService($order);
+        $configRef = data_get($order, 'currentLogistics.payload.chinapost.config_ref');
+        $service = new ChinaPostService($order, $configRef);
         $result = $service->cancelOrder($order->tracking_number);
 
         if ($result['success']) {
@@ -1983,6 +1986,7 @@ class OrderLogisticsController extends Controller
                     'waybill_no' => $trackingNumber,
                     'biz_product_no' => '019',
                     'request' => $result['request'] ?? null,
+                    'config_ref' => (new LogisticsConfigResolver())->buildConfigRef($order, LogisticsConfigResolver::PROVIDER_CHINAPOST),
                 ],
             ],
         ]);
@@ -2022,6 +2026,7 @@ class OrderLogisticsController extends Controller
                     'chinapost' => [
                         'waybill_no' => $trackingNumber,
                         'barcode_allocation' => $result['ret_body'] ?? [],
+                        'config_ref' => (new LogisticsConfigResolver())->buildConfigRef($order, LogisticsConfigResolver::PROVIDER_CHINAPOST),
                     ],
                 ],
             ]);

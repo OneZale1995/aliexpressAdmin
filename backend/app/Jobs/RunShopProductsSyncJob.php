@@ -75,10 +75,16 @@ class RunShopProductsSyncJob implements ShouldQueue
 
     public function failed(\Throwable $e): void
     {
+        $message = $e->getMessage();
+        $previous = $e->getPrevious();
+        if ($previous) {
+            $message = $previous->getMessage() ?: $message;
+        }
+
         Log::channel('third_party')->error('Shop products sync failed', [
             'shop_id' => $this->shopId,
             'product_count' => count($this->productIds),
-            'message' => $e->getMessage(),
+            'message' => $message,
         ]);
     }
 }

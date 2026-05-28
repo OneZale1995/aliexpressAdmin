@@ -18,7 +18,7 @@
       <el-row :gutter="12">
         <el-col :span="12">
           <el-form-item label="采购额">
-            <el-input v-model.number="commentTemp.purchase_amount" type="number" min="0" />
+            <el-input-number v-model="commentTemp.purchase_amount" :step="0.01"  min="0" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
@@ -27,10 +27,10 @@
           </el-form-item>
         </el-col>
       </el-row>
-      <el-row :gutter="12">
-        <el-col :span="12">
+      <el-row :gutter="24">
+        <el-col :span="24">
           <el-form-item label="物流费">
-            <el-input v-model.number="commentTemp.logistics_fee" type="number" min="0" />
+            <el-input-number v-model="commentTemp.logistics_fee" :step="0.01" min="0" />
             <span class="text-muted" style="font-size:11px;">公式: 重量x35+15，可手动修改</span>
           </el-form-item>
         </el-col>

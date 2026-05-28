@@ -6,20 +6,18 @@ use App\Http\Controllers\Controller;
 use App\Models\Menu;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class MenuController extends Controller
 {
     use ApiResponse;
 
+    private const MENU_TREE_CACHE_KEY = 'bootstrap:menu_tree:v1';
+    private const MENU_TREE_CACHE_TTL = 300;
+
     public function index(Request $request)
     {
-        $menus = Menu::orderBy('sort')->get();
-
-        if ($request->get('tree')) {
-            return $this->success($this->buildTree($menus));
-        }
-
-        return $this->success($this->buildTree($menus));
+        return $this->success($this->getCachedMenuTree());
     }
 
     public function store(Request $request)
@@ -41,6 +39,8 @@ class MenuController extends Controller
             'parent_id', 'title', 'icon', 'path', 'component',
             'permission', 'type', 'hidden', 'sort', 'status',
         ]));
+
+        $this->clearMenuTreeCache();
 
         return $this->success($menu);
     }
@@ -72,6 +72,8 @@ class MenuController extends Controller
             'permission', 'type', 'hidden', 'sort', 'status',
         ]));
 
+        $this->clearMenuTreeCache();
+
         return $this->success($menu);
     }
 
@@ -85,7 +87,22 @@ class MenuController extends Controller
 
         $menu->delete();
 
+        $this->clearMenuTreeCache();
+
         return $this->success();
+    }
+
+    private function clearMenuTreeCache(): void
+    {
+        Cache::forget(self::MENU_TREE_CACHE_KEY);
+    }
+
+    private function getCachedMenuTree(): array
+    {
+        return Cache::remember(self::MENU_TREE_CACHE_KEY, self::MENU_TREE_CACHE_TTL, function () {
+            $menus = Menu::query()->orderBy('sort')->get();
+            return $this->buildTree($menus);
+        });
     }
 
     private function buildTree($menus, $parentId = 0)

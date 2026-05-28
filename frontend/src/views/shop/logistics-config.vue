@@ -7,15 +7,6 @@
       style="margin-bottom: 16px;"
     />
 
-    <el-card shadow="never" style="margin-bottom: 16px;">
-      <div slot="header">功能开关状态</div>
-      <div>团队物流配置：{{ switches.enable_team_logistics_config ? '已开启' : '未开启' }}</div>
-      <div style="margin-top: 8px;">用户物流配置：{{ switches.enable_user_logistics_config ? '已开启' : '未开启' }}</div>
-      <div style="margin-top: 8px; color: #909399;">
-        提示：开关在“系统管理 / 系统配置 / 物流插件开关”里维护。
-      </div>
-    </el-card>
-
     <el-row :gutter="16">
       <el-col v-if="teamScope.available" :xs="24" :md="12">
         <el-card shadow="never" style="margin-bottom: 16px;">
@@ -85,7 +76,7 @@
         </el-card>
       </el-col>
 
-      <el-col v-if="userScope.available" :xs="24" :md="12">
+      <el-col v-if="userScope.available && switches.enable_user_logistics_config" :xs="24" :md="12">
         <el-card shadow="never" style="margin-bottom: 16px;">
           <div slot="header">个人物流配置</div>
           <div style="margin-bottom: 12px; color: #909399;">个人配置启用后优先于团队配置。</div>

@@ -1,45 +1,32 @@
-import { asyncRoutes, constantRoutes } from '@/router'
+import { fetchMenuList, fetchLogisticsConfigCurrent } from '@/api/system'
+import { constantRoutes } from '@/router'
+import { buildRoutesFromMenus } from '@/router/menu-routes'
 
-/**
- * Use meta.role to determine if the current user has permission
- * @param roles
- * @param route
- */
-function hasPermission(roles, route) {
-  if (route.meta && route.meta.roles) {
-    return roles.some(role => route.meta.roles.includes(role))
-  } else {
-    return true
-  }
+const notFoundRoute = {
+  path: '*',
+  redirect: '/404',
+  hidden: true
 }
 
-/**
- * Filter asynchronous routing tables by recursion
- * @param routes asyncRoutes
- * @param roles
- * @param switches
- */
-export function filterAsyncRoutes(routes, roles, switches) {
-  const res = []
+function filterLogisticsConfigRoutes(routes, roles, switches) {
+  return routes
+    .map(route => {
+      const clonedRoute = { ...route }
 
-  routes.forEach(route => {
-    const tmp = { ...route }
-    if (hasPermission(roles, tmp)) {
-      if (tmp.children) {
-        tmp.children = filterAsyncRoutes(tmp.children, roles, switches)
+      if (clonedRoute.children) {
+        clonedRoute.children = filterLogisticsConfigRoutes(clonedRoute.children, roles, switches)
       }
-      // 物流配置菜单：开关都关闭时仅超级管理员可见
-      if (tmp.name === 'ShopLogisticsConfig') {
+
+      if (clonedRoute.name === 'ShopLogisticsConfig') {
         const anySwitchOn = switches && (switches.enable_team_logistics_config || switches.enable_user_logistics_config)
         if (!roles.includes('super-admin') && !anySwitchOn) {
-          return
+          return null
         }
       }
-      res.push(tmp)
-    }
-  })
 
-  return res
+      return clonedRoute
+    })
+    .filter(Boolean)
 }
 
 const state = {
@@ -59,17 +46,39 @@ const mutations = {
 }
 
 const actions = {
-  generateRoutes({ commit, state }, roles) {
-    return new Promise(resolve => {
-      let accessedRoutes
-      if (roles.includes('super-admin')) {
-        accessedRoutes = asyncRoutes || []
-      } else {
-        accessedRoutes = filterAsyncRoutes(asyncRoutes, roles, state.logisticsSwitches)
-      }
-      commit('SET_ROUTES', accessedRoutes)
-      resolve(accessedRoutes)
-    })
+  async generateRoutes({ commit, state, rootGetters }, roles) {
+    const bootstrap = rootGetters.bootstrap || {}
+    let menus = Array.isArray(bootstrap.menus) ? bootstrap.menus : []
+    if (!menus.length) {
+      const response = await fetchMenuList({ tree: 1 })
+      menus = response.data || []
+    }
+    const permissions = rootGetters.permissions || []
+
+    let accessedRoutes = buildRoutesFromMenus(menus, permissions, roles)
+    accessedRoutes = filterLogisticsConfigRoutes(accessedRoutes, roles, state.logisticsSwitches)
+    accessedRoutes = accessedRoutes.concat([notFoundRoute])
+
+    commit('SET_ROUTES', accessedRoutes)
+    return accessedRoutes
+  },
+  async loadLogisticsSwitches({ commit, rootGetters }) {
+    const bootstrap = rootGetters.bootstrap || {}
+    const bootstrapSwitches = bootstrap.logistics_switches
+    if (bootstrapSwitches && typeof bootstrapSwitches === 'object' && Object.keys(bootstrapSwitches).length) {
+      commit('SET_LOGISTICS_SWITCHES', bootstrapSwitches)
+      return bootstrapSwitches
+    }
+
+    try {
+      const switchRes = await fetchLogisticsConfigCurrent()
+      const switches = (switchRes && switchRes.data && switchRes.data.switches) || {}
+      commit('SET_LOGISTICS_SWITCHES', switches)
+      return switches
+    } catch (error) {
+      commit('SET_LOGISTICS_SWITCHES', {})
+      return {}
+    }
   }
 }
 

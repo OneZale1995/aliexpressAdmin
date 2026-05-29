@@ -2002,7 +2002,7 @@ class OrderLogisticsController extends Controller
                 $errors[] = '第' . $line . '行商品类型名称（英文）长度不能超过50';
             }
 
-            $declaredValue = $item['cargo_value'] ?? null;
+            $declaredValue = $item['cargo_value'] ?? ($item['cost'] ?? null);
             if (is_string($declaredValue)) {
                 $declaredValue = trim($declaredValue);
             }
@@ -2039,8 +2039,41 @@ class OrderLogisticsController extends Controller
             $cargoTypeName = trim((string) ($item['cargo_type_name'] ?? ''));
             $cargoDescription = trim((string) ($item['cargo_description'] ?? ''));
 
+            if ($declaredValue === '' && $cost !== '') {
+                $item['cargo_value'] = $cost;
+                $declaredValue = $cost;
+            }
+
             if ($declaredValue !== '' && $cost === '') {
                 $item['cost'] = $declaredValue;
+            }
+
+            if ($cargoName === '') {
+                $fallbackCargoName = $cargoTypeName !== ''
+                    ? $cargoTypeName
+                    : ($cargoNameEn !== '' ? $cargoNameEn : '商品');
+
+                $item['cargo_name'] = mb_substr($fallbackCargoName, 0, 50);
+                $cargoName = trim((string) $item['cargo_name']);
+            }
+
+            if ($cargoNameEn === '') {
+                $fallbackCargoNameEn = $cargoTypeNameEn !== ''
+                    ? $cargoTypeNameEn
+                    : ($cargoName !== '' ? $cargoName : 'Product');
+
+                $item['cargo_name_en'] = mb_substr($fallbackCargoNameEn, 0, 50);
+                $cargoNameEn = trim((string) $item['cargo_name_en']);
+            }
+
+            if ($cargoTypeName === '' && $cargoName !== '') {
+                $item['cargo_type_name'] = mb_substr($cargoName, 0, 50);
+                $cargoTypeName = trim((string) $item['cargo_type_name']);
+            }
+
+            if ($cargoTypeNameEn === '' && $cargoNameEn !== '') {
+                $item['cargo_type_name_en'] = mb_substr($cargoNameEn, 0, 50);
+                $cargoTypeNameEn = trim((string) $item['cargo_type_name_en']);
             }
 
             if ($cargoDescription === '') {
@@ -2054,6 +2087,17 @@ class OrderLogisticsController extends Controller
 
                 $item['cargo_description'] = mb_substr($fallbackDescription, 0, 200);
             }
+
+            $resolvedWeight = $item['cargo_weight'] ?? ($item['carogo_weight'] ?? null);
+            if (is_string($resolvedWeight)) {
+                $resolvedWeight = trim($resolvedWeight);
+            }
+            if (!is_numeric($resolvedWeight) || (float) $resolvedWeight <= 0) {
+                $resolvedWeight = 1;
+            }
+
+            $item['cargo_weight'] = (float) $resolvedWeight;
+            $item['carogo_weight'] = (float) $resolvedWeight;
 
             return $item;
         }, $items);

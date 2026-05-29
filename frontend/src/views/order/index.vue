@@ -1035,17 +1035,47 @@ export default {
         })
 
         const backendItems = Array.isArray(logisticsInterface.items) ? logisticsInterface.items : []
-        if (backendItems.length && (!Array.isArray(this.shipForm.chinapost_items) || this.shipForm.chinapost_items.length <= 1)) {
-          this.$set(this.shipForm, 'chinapost_items', backendItems.map(item => {
-            const newItem = createDefaultChinaPostItem(item)
-            newItem.cost = (Math.random() * 9 + 1).toFixed(2)
-            newItem.cargo_value = newItem.cost
-            return newItem
-          }))
+        if (backendItems.length) {
+          this.$set(this.shipForm, 'chinapost_items', backendItems.map(item => this.normalizeChinaPostItemForSubmit(item)))
         }
       }).catch(err => {
         this.showError(err, '获取中国邮政请求参数失败')
       })
+    },
+    normalizeChinaPostItemForSubmit(rawItem = {}) {
+      const item = createDefaultChinaPostItem(rawItem && typeof rawItem === 'object' ? rawItem : {})
+      const cargoName = String(item.cargo_name || '').trim()
+      const cargoNameEn = String(item.cargo_name_en || '').trim()
+      const cargoTypeName = String(item.cargo_type_name || '').trim()
+      const cargoTypeNameEn = String(item.cargo_type_name_en || '').trim()
+
+      const resolvedCargoName = cargoName || cargoTypeName || cargoNameEn || '商品'
+      const resolvedCargoNameEn = cargoNameEn || cargoTypeNameEn || cargoName || 'Product'
+      const declaredRaw = String(item.cargo_value || item.cost || '').trim()
+      const declaredNumeric = Number(declaredRaw)
+      const resolvedDeclaredValue = declaredNumeric > 0 ? declaredRaw : (Math.random() * 9 + 1).toFixed(2)
+
+      item.cargo_name = resolvedCargoName
+      item.cargo_name_en = resolvedCargoNameEn
+      item.cargo_type_name = cargoTypeName || resolvedCargoName
+      item.cargo_type_name_en = cargoTypeNameEn || resolvedCargoNameEn
+      item.cost = resolvedDeclaredValue
+      item.cargo_value = resolvedDeclaredValue
+
+      if (!String(item.cargo_description || '').trim()) {
+        item.cargo_description = resolvedCargoNameEn || resolvedCargoName
+      }
+
+      item.cargo_quantity = Number(item.cargo_quantity || 0) > 0 ? Number(item.cargo_quantity) : 1
+      const resolvedWeight = Number(item.cargo_weight || item.carogo_weight || 0) > 0
+        ? Number(item.cargo_weight || item.carogo_weight || 0)
+        : 1
+      item.cargo_weight = resolvedWeight
+      item.carogo_weight = resolvedWeight
+      item.cargo_origin_name = String(item.cargo_origin_name || 'CN').trim() || 'CN'
+      item.unit = String(item.unit || '个').trim() || '个'
+
+      return item
     },
     parseChinaPostRequest() {
       const raw = String(this.shipForm.chinapost_request_json || '').trim()
@@ -1083,7 +1113,7 @@ export default {
       }
       this.sanitizeChinaPostContact(logisticsInterface.receiver)
       if (Array.isArray(this.shipForm.chinapost_items) && this.shipForm.chinapost_items.length) {
-        logisticsInterface.items = this.shipForm.chinapost_items
+        logisticsInterface.items = this.shipForm.chinapost_items.map(item => this.normalizeChinaPostItemForSubmit(item))
       }
       if (this.shipForm.chinapost_form && typeof this.shipForm.chinapost_form === 'object') {
         const formFields = this.shipForm.chinapost_form

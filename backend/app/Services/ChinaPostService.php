@@ -739,6 +739,7 @@ class ChinaPostService
         $cargoItems = [];
 
         $productCategoryMap = [];
+        $productSubjectEnMap = [];
         $shopId = (int) ($order->shop_id ?? 0);
         $aeItemIds = $items
             ->pluck('ae_item_id')
@@ -748,11 +749,25 @@ class ChinaPostService
             ->values();
 
         if (!$hasProvidedItems && $shopId > 0 && $aeItemIds->isNotEmpty()) {
-            $productCategoryMap = Product::query()
+            $products = Product::query()
                 ->where('shop_id', $shopId)
                 ->whereIn('ae_item_id', $aeItemIds->all())
+                ->get(['ae_item_id', 'category_name', 'subjects']);
+
+            $productCategoryMap = $products
                 ->pluck('category_name', 'ae_item_id')
                 ->map(fn ($name) => (string) $name)
+                ->toArray();
+
+            $productSubjectEnMap = $products
+                ->mapWithKeys(function ($product) {
+                    $aeItemId = (string) ($product->ae_item_id ?? '');
+                    if ($aeItemId === '') {
+                        return [];
+                    }
+
+                    return [$aeItemId => $this->extractEnglishSubjectText($product->subjects)];
+                })
                 ->toArray();
         }
 
@@ -770,9 +785,12 @@ class ChinaPostService
 
             $itemName = (string) ($item->name ?: '商品');
             $itemNameEn = (string) ($item->name ?: 'Product');
-            $categoryName = (string) ($productCategoryMap[(string) ($item->ae_item_id ?? '')] ?? '');
+            $aeItemId = (string) ($item->ae_item_id ?? '');
+            $categoryName = (string) ($productCategoryMap[$aeItemId] ?? '');
+            $subjectEn = trim((string) ($productSubjectEnMap[$aeItemId] ?? ''));
             $cargoTypeName = $categoryName !== '' ? $categoryName : $itemName;
             $cargoTypeNameEn = $categoryName !== '' ? $categoryName : $itemNameEn;
+            $cargoDescription = $subjectEn !== '' ? $subjectEn : $itemName;
 
             $cargoItems[] = [
                 'cargo_no' => (string) ($item->sku_code ?: $item->ae_sku_id ?: ($index + 1)),
@@ -787,7 +805,8 @@ class ChinaPostService
                 'cost' => round($price, 2),
                 'cargo_currency' => 'USD',
                 'carogo_weight' => $weight,
-                'cargo_description' => mb_substr($itemNameEn, 0, 200),
+                'cargo_weight' => $weight,
+                'cargo_description' => mb_substr($cargoDescription, 0, 200),
                 'cargo_serial' => '',
                 'unit' => (string) $this->public('item_unit', '个'),
                 'intemsize' => '',
@@ -914,6 +933,51 @@ class ChinaPostService
         ];
     }
 
+    protected function extractEnglishSubjectText($subjects): string
+    {
+        if (!is_array($subjects) || empty($subjects)) {
+            return '';
+        }
+
+        // Common shape: [{"name":"Phone stand","locale":"en_US"}, ...]
+        foreach ($subjects as $subject) {
+            if (!is_array($subject)) {
+                continue;
+            }
+
+            $locale = strtolower(trim((string) ($subject['locale'] ?? $subject['lang'] ?? $subject['language'] ?? '')));
+            $name = trim((string) ($subject['name'] ?? $subject['subject'] ?? $subject['title'] ?? ''));
+
+            if ($name === '' || $locale === '') {
+                continue;
+            }
+
+            if (str_contains($locale, 'en')) {
+                return $name;
+            }
+        }
+
+        // Alternative shape: {"en_US":"Phone stand", "ru_RU":"..."}
+        foreach ($subjects as $key => $value) {
+            if (!is_string($key) || !str_contains(strtolower($key), 'en')) {
+                continue;
+            }
+
+            if (is_string($value) && trim($value) !== '') {
+                return trim($value);
+            }
+
+            if (is_array($value)) {
+                $name = trim((string) ($value['name'] ?? $value['subject'] ?? $value['title'] ?? ''));
+                if ($name !== '') {
+                    return $name;
+                }
+            }
+        }
+
+        return '';
+    }
+
     protected function buildPayloadFromGivenLogisticsInterface(Order $order, string $bizProductNo, array $options = []): array
     {
         $baseOptions = $options;
@@ -952,6 +1016,15 @@ class ChinaPostService
                 }
                 if ($cargoNameEn !== '') {
                     $item['cargo_type_name_en'] = $cargoNameEn;
+                }
+
+                $resolvedWeight = $item['carogo_weight'] ?? ($item['cargo_weight'] ?? null);
+                if (is_string($resolvedWeight)) {
+                    $resolvedWeight = trim($resolvedWeight);
+                }
+                if (is_numeric($resolvedWeight) && (float) $resolvedWeight > 0) {
+                    $item['carogo_weight'] = (float) $resolvedWeight;
+                    $item['cargo_weight'] = (float) $resolvedWeight;
                 }
 
                 return $item;

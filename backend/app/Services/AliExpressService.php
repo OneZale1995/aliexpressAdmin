@@ -1494,13 +1494,15 @@ class AliExpressService
                 $markedNotFound = $this->isProductDetailNotFoundResponse($response->status(), $payload);
                 if ($markedNotFound) {
                     $this->markProductDetailNotFound($shop, $productId);
+                    return null;
                 }
 
                 $this->thirdPartyLog()->warning('AliExpress getProductDetail failed', [
                     'product_id' => $productId,
                     'status' => $response->status(),
-                    'marked_not_found' => $markedNotFound,
-                    'response'   => $payload,
+                    'marked_not_found' => false,
+                    'error_code' => data_get($payload, 'error.code'),
+                    'error_message' => data_get($payload, 'error.message') ?: data_get($payload, 'message'),
                 ]);
 
                 $errorMsg = $payload['error']['message'] ?? '';
@@ -1518,6 +1520,11 @@ class AliExpressService
 
             return $detail;
         } catch (\Exception $e) {
+            if ($this->isProductDetailNotFoundException($e)) {
+                $this->markProductDetailNotFound($shop, $productId);
+                return null;
+            }
+
             $this->thirdPartyLog()->error('AliExpress getProductDetail exception', [
                 'product_id' => $productId,
                 'message'    => $e->getMessage(),
@@ -2499,6 +2506,17 @@ class AliExpressService
             || str_contains($errorCode, 'not_found')
             || str_contains($errorMessage, 'not found')
             || str_contains($errorMessage, 'does not exist');
+    }
+
+    protected function isProductDetailNotFoundException(\Throwable $e): bool
+    {
+        $message = strtolower(trim($e->getMessage()));
+
+        return str_contains($message, 'status code 404')
+            || str_contains($message, '"code":404')
+            || str_contains($message, 'product not found')
+            || str_contains($message, 'not found')
+            || str_contains($message, 'does not exist');
     }
 
     protected function markProductDetailNotFound(Shop $shop, string $productId): void

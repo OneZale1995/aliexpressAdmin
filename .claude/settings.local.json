@@ -41,7 +41,12 @@
       "Bash(Get-ChildItem -Path \"D:\\\\developTools\\\\phpstudy_pro\\\\WWW\\\\aliexpressAdmin\" -Directory -Depth 1)",
       "PowerShell(php artisan migrate --path=database/migrations/2026_05_17_000000_create_order_blacklists_table.php)",
       "Bash(composer show *)",
-      "Bash(Select-String -Pattern \"spout|spreadsheet|phpoffice\")"
+      "Bash(Select-String -Pattern \"spout|spreadsheet|phpoffice\")",
+      "Bash(Select-Object -First 5)",
+      "Bash(Get-ChildItem -Path \"D:\\\\developTools\\\\phpstudy_pro\\\\WWW\\\\marketAdmin\" -File -Depth 0)",
+      "PowerShell(Get-ChildItem -Path \"D:\\\\developTools\\\\phpstudy_pro\\\\WWW\\\\marketAdmin\\\\app\" -Directory -Depth 1 | ForEach-Object { $_.FullName.Replace\\(\"D:\\\\developTools\\\\phpstudy_pro\\\\WWW\\\\marketAdmin\\\\\", \"\"\\) })",
+      "Bash(Select-Object -Last 20)",
+      "Bash(npx eslint *)"
     ]
   }
 }

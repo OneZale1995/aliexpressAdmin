@@ -151,12 +151,13 @@ class LogisticsConfigController extends Controller
     private function resolveTeamScopeId(Request $request, User $user): ?int
     {
         if ($user->hasRole('super-admin')) {
-            if ($request->filled('team_id')) {
-                $teamId = (int) $request->input('team_id');
-                return Team::query()->whereKey($teamId)->exists() ? $teamId : null;
+            // 支持 team_id 或 scope_id 参数指定目标团队
+            $teamId = $request->input('team_id') ?? $request->input('scope_id');
+            if ($teamId) {
+                return Team::query()->whereKey((int) $teamId)->exists() ? (int) $teamId : null;
             }
-
-            return null;
+            // 未指定时默认返回第一个团队，让配置面板可见
+            return (int) Team::query()->min('id') ?: null;
         }
 
         if ($this->isTeamAdmin($user)) {
@@ -168,9 +169,12 @@ class LogisticsConfigController extends Controller
 
     private function resolveUserScopeId(Request $request, User $user): ?int
     {
-        if ($user->hasRole('super-admin') && $request->filled('user_id')) {
-            $userId = (int) $request->input('user_id');
-            return User::query()->whereKey($userId)->exists() ? $userId : null;
+        if ($user->hasRole('super-admin')) {
+            // 支持 user_id 或 scope_id 参数指定目标用户
+            $userId = $request->input('user_id') ?? $request->input('scope_id');
+            if ($userId) {
+                return User::query()->whereKey((int) $userId)->exists() ? (int) $userId : null;
+            }
         }
 
         return (int) $user->id;

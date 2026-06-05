@@ -1036,14 +1036,15 @@ export default {
 
         const backendItems = Array.isArray(logisticsInterface.items) ? logisticsInterface.items : []
         if (backendItems.length) {
-          this.$set(this.shipForm, 'chinapost_items', backendItems.map(item => this.normalizeChinaPostItemForSubmit(item)))
+          this.$set(this.shipForm, 'chinapost_items', backendItems.map(item => this.normalizeChinaPostItemForSubmit(item, { forceRandomDeclaredValue: true })))
         }
       }).catch(err => {
         this.showError(err, '获取中国邮政请求参数失败')
       })
     },
-    normalizeChinaPostItemForSubmit(rawItem = {}) {
+    normalizeChinaPostItemForSubmit(rawItem = {}, options = {}) {
       const item = createDefaultChinaPostItem(rawItem && typeof rawItem === 'object' ? rawItem : {})
+      const forceRandomDeclaredValue = Boolean(options.forceRandomDeclaredValue)
       const cargoName = String(item.cargo_name || '').trim()
       const cargoNameEn = String(item.cargo_name_en || '').trim()
       const cargoTypeName = String(item.cargo_type_name || '').trim()
@@ -1053,7 +1054,9 @@ export default {
       const resolvedCargoNameEn = cargoNameEn || cargoTypeNameEn || cargoName || 'Product'
       const declaredRaw = String(item.cargo_value || item.cost || '').trim()
       const declaredNumeric = Number(declaredRaw)
-      const resolvedDeclaredValue = declaredNumeric > 0 ? declaredRaw : (Math.random() * 9 + 1).toFixed(2)
+      const resolvedDeclaredValue = (forceRandomDeclaredValue || declaredNumeric <= 0)
+        ? (Math.random() * 9 + 1).toFixed(2)
+        : declaredRaw
 
       item.cargo_name = resolvedCargoName
       item.cargo_name_en = resolvedCargoNameEn

@@ -72,7 +72,9 @@ function hasMenuPermission(menu, permissions, roles) {
   }
 
   if (!menu.permission) {
-    return true
+    // 没有配置 permission 的菜单目录，交给 children 判断：
+    // 如果有可见子菜单则保留父级，否则隐藏
+    return false
   }
 
   return permissions.includes(menu.permission) || permissions.some(permission => permission.startsWith(`${menu.permission}.`))

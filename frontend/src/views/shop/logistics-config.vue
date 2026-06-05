@@ -10,7 +10,25 @@
     <el-row :gutter="16">
       <el-col v-if="teamScope.available" :xs="24" :md="12">
         <el-card shadow="never" style="margin-bottom: 16px;">
-          <div slot="header">团队物流配置</div>
+          <div slot="header">
+            <span>团队物流配置</span>
+            <el-select
+              v-if="isSuperAdmin"
+              v-model="selectedTeamId"
+              size="small"
+              filterable
+              placeholder="选择团队"
+              style="margin-left: 12px; width: 200px;"
+              @change="onTeamChange"
+            >
+              <el-option
+                v-for="t in teamOptions"
+                :key="t.id"
+                :label="t.name"
+                :value="t.id"
+              />
+            </el-select>
+          </div>
           <div style="margin-bottom: 12px; color: #909399;">仅团队管理员可编辑；保存后覆盖系统配置。</div>
 
           <div class="provider-block">
@@ -78,7 +96,25 @@
 
       <el-col v-if="userScope.available && switches.enable_user_logistics_config" :xs="24" :md="12">
         <el-card shadow="never" style="margin-bottom: 16px;">
-          <div slot="header">个人物流配置</div>
+          <div slot="header">
+            <span>个人物流配置</span>
+            <el-select
+              v-if="isSuperAdmin"
+              v-model="selectedUserId"
+              size="small"
+              filterable
+              placeholder="选择用户"
+              style="margin-left: 12px; width: 200px;"
+              @change="onUserChange"
+            >
+              <el-option
+                v-for="u in userOptions"
+                :key="u.id"
+                :label="u.nickname || u.username"
+                :value="u.id"
+              />
+            </el-select>
+          </div>
           <div style="margin-bottom: 12px; color: #909399;">个人配置启用后优先于团队配置。</div>
 
           <div class="provider-block">
@@ -148,7 +184,8 @@
 </template>
 
 <script>
-import { fetchLogisticsConfigCurrent, saveLogisticsConfig } from '@/api/system'
+import { fetchLogisticsConfigCurrent, saveLogisticsConfig, fetchUserList } from '@/api/system'
+import { fetchAllTeams } from '@/api/shop'
 import { mapGetters } from 'vuex'
 
 function createEmptyScope() {
@@ -190,29 +227,77 @@ export default {
         enable_user_logistics_config: false
       },
       teamScope: createEmptyScope(),
-      userScope: createEmptyScope()
+      userScope: createEmptyScope(),
+      teamOptions: [],
+      userOptions: [],
+      selectedTeamId: null,
+      selectedUserId: null
     }
   },
   computed: {
     ...mapGetters(['roles']),
+    isSuperAdmin() {
+      return (this.roles || []).includes('super-admin')
+    },
     canEditTeam() {
-      return (this.roles || []).includes('super-admin') || (this.roles || []).includes('team-admin')
+      return this.isSuperAdmin || (this.roles || []).includes('team-admin')
     }
   },
   created() {
-    this.fetchCurrent()
+    this.init()
   },
   methods: {
+    init() {
+      if (this.isSuperAdmin) {
+        Promise.all([this.fetchTeams(), this.fetchUsers()]).then(() => {
+          this.fetchCurrent()
+        })
+      } else {
+        this.fetchCurrent()
+      }
+    },
+    fetchTeams() {
+      return fetchAllTeams().then((res) => {
+        this.teamOptions = (res.data || []).map(t => ({ id: t.id, name: t.name }))
+      })
+    },
+    fetchUsers() {
+      return fetchUserList({ all: 1 }).then((res) => {
+        this.userOptions = (res.data || []).map(u => ({ id: u.id, username: u.username, nickname: u.nickname }))
+      })
+    },
     fetchCurrent() {
       this.loading = true
-      fetchLogisticsConfigCurrent().then((res) => {
+      const params = {}
+      if (this.isSuperAdmin && this.selectedTeamId) {
+        params.team_id = this.selectedTeamId
+      }
+      if (this.isSuperAdmin && this.selectedUserId) {
+        params.user_id = this.selectedUserId
+      }
+      fetchLogisticsConfigCurrent(params).then((res) => {
         const data = res.data || {}
         this.switches = Object.assign({}, this.switches, data.switches || {})
         this.teamScope = Object.assign(createEmptyScope(), data.scopes && data.scopes.team ? data.scopes.team : {})
         this.userScope = Object.assign(createEmptyScope(), data.scopes && data.scopes.user ? data.scopes.user : {})
+        // 同步选中值到后端返回的 scope_id
+        if (this.isSuperAdmin && !this.selectedTeamId && data.scopes && data.scopes.team) {
+          this.selectedTeamId = data.scopes.team.scope_id
+        }
+        if (this.isSuperAdmin && !this.selectedUserId && data.scopes && data.scopes.user) {
+          this.selectedUserId = data.scopes.user.scope_id
+        }
       }).finally(() => {
         this.loading = false
       })
+    },
+    onTeamChange(teamId) {
+      this.selectedTeamId = teamId
+      this.fetchCurrent()
+    },
+    onUserChange(userId) {
+      this.selectedUserId = userId
+      this.fetchCurrent()
     },
     saveScopeProvider(scopeType, provider) {
       const scope = scopeType === 'team' ? this.teamScope : this.userScope
@@ -222,6 +307,13 @@ export default {
         provider,
         enabled: !!scope.providers[provider].enabled,
         config: scope.providers[provider].config
+      }
+      // 超管保存时显式传递 team_id / user_id，确保后端解析到正确的目标
+      if (this.isSuperAdmin && scopeType === 'team' && this.selectedTeamId) {
+        payload.team_id = this.selectedTeamId
+      }
+      if (this.isSuperAdmin && scopeType === 'user' && this.selectedUserId) {
+        payload.user_id = this.selectedUserId
       }
 
       saveLogisticsConfig(payload).then(() => {

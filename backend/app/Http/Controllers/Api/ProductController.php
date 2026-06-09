@@ -10,7 +10,6 @@ use App\Models\Product;
 use App\Models\ProductExportTask;
 use App\Models\Shop;
 use App\Models\Team;
-use App\Services\ProductSyncStateService;
 use App\Services\ProductExportService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
@@ -31,7 +30,7 @@ class ProductController extends Controller
 
     private array $categoryPropertyValueCache = [];
 
-    public function index(Request $request, ProductSyncStateService $productSyncStateService)
+    public function index(Request $request)
     {
         $user = $request->user();
 
@@ -76,26 +75,19 @@ class ProductController extends Controller
             ->limit($limit)
             ->get();
 
-        $syncStates = $productSyncStateService->getStates($items->pluck('shop_id')->all());
-        $selectedShopSyncState = $request->filled('shop_id')
-            ? ($syncStates[(int) $request->shop_id] ?? $productSyncStateService->getState((int) $request->shop_id))
-            : null;
-
-        $items = $items->map(function ($p) use ($syncStates) {
+        $items = $items->map(function ($p) {
                 $data = $p->toArray();
                 if (empty($data['main_image_url'])) {
                     $data['main_image_url'] = $this->extractProductImages($p)[0] ?? '';
                 }
                 $data['sku_count'] = is_array($p->skus) ? count($p->skus) : 0;
-                $data['sync_queue'] = $syncStates[(int) $p->shop_id] ?? null;
-                unset($data['raw_data'], $data['skus'], $data['properties']);
+                unset($data['raw_data'], $data['skus'], $data['properties'], $data['media']);
                 return $data;
             });
 
         return $this->success([
             'total' => $total,
             'items' => $items,
-            'sync_queue' => $selectedShopSyncState,
         ]);
     }
 

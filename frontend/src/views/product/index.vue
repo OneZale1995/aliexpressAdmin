@@ -104,15 +104,6 @@
           <el-tag :type="statusTagType(row.status_type)" size="small">{{ statusLabel(row.status_type) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="同步队列" align="center" width="150">
-        <template slot-scope="{row}">
-          <div v-if="row.sync_queue">
-            <el-tag :type="queueTagType(row.sync_queue.status)" size="small">{{ queueStatusLabel(row.sync_queue.status) }}</el-tag>
-            <div style="font-size:12px;color:#909399;margin-top:4px;">{{ row.sync_queue.queue || '-' }}</div>
-          </div>
-          <span v-else>-</span>
-        </template>
-      </el-table-column>
       <el-table-column label="店铺" align="center" width="140">
         <template slot-scope="{row}">{{ row.shop ? row.shop.name : '-' }}</template>
       </el-table-column>

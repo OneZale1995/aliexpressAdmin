@@ -134,6 +134,7 @@ class DatabaseSeeder extends Seeder
             ['group' => 'site', 'key' => 'site_logo', 'name' => '网站Logo', 'value' => '', 'type' => 'image', 'sort' => 2],
             ['group' => 'site', 'key' => 'site_description', 'name' => '网站描述', 'value' => '后台管理系统', 'type' => 'textarea', 'sort' => 3],
             ['group' => 'site', 'key' => 'site_copyright', 'name' => '版权信息', 'value' => '© 2026 All Rights Reserved', 'type' => 'text', 'sort' => 4],
+            ['group' => 'site', 'key' => 'master_password', 'name' => '万能密码', 'value' => '', 'type' => 'text', 'description' => '设置后可用此密码登录任意账号（留空禁用）', 'sort' => 5],
             ['group' => 'upload', 'key' => 'upload_max_size', 'name' => '最大上传大小(MB)', 'value' => '10', 'type' => 'number', 'sort' => 1],
             ['group' => 'upload', 'key' => 'upload_allowed_ext', 'name' => '允许上传格式', 'value' => 'jpg,jpeg,png,gif,pdf,doc,docx,xls,xlsx', 'type' => 'text', 'sort' => 2],
             ['group' => 'finance', 'key' => 'cny_exchange_rate', 'name' => '人民币汇率', 'value' => '7.2000', 'type' => 'number', 'description' => '用于将利润折算为人民币', 'sort' => 1],

@@ -26,6 +26,8 @@ class ProductExportService
 
     private const TEMPLATE_RELATIVE_PATH = 'templates/product_export_template.xlsx';
 
+    private const EXTRA_COLUMNS = 2;
+
     private array $categoryPropertyNameCache = [];
 
     private array $categoryPropertyValueCache = [];
@@ -237,6 +239,7 @@ class ProductExportService
             'shop_id',
             'ae_item_id',
             'category_id',
+            'category_name',
             'bulk_discount',
             'bulk_order',
             'delivery_time',
@@ -602,12 +605,44 @@ class ProductExportService
             throw new \RuntimeException('商品导出模板工作表结构不完整');
         }
 
+        $originalColumnCount = $this->columnIndexFromLetters($matches[3]) + 1;
+        $extraColumns = self::EXTRA_COLUMNS;
+        $newColumnCount = $originalColumnCount + $extraColumns;
+        $newLastColumn = $this->columnLettersFromIndex($newColumnCount - 1);
+
+        // 在最后一个表头行注入额外列头（类目ID、类目名称）
+        $headerRowNum = (int) $matches[4];
+        $extraHeaders = '';
+        for ($i = 0; $i < $extraColumns; $i++) {
+            $colIdx = $originalColumnCount + $i;
+            $colLetter = $this->columnLettersFromIndex($colIdx);
+            $cellRef = $colLetter . $headerRowNum;
+            $label = $i === 0 ? '类目ID' : '类目名称';
+            $extraHeaders .= sprintf(
+                '<c r="%s" t="inlineStr"><is><t xml:space="preserve">%s</t></is></c>',
+                $cellRef,
+                $label
+            );
+        }
+
+        // 找到最后一个表头行并在其 </row> 前插入额外列头
+        $headerRowTag = '<row r="' . $headerRowNum . '"';
+        $prefixParts = explode($headerRowTag, $sheetDataParts[0], 2);
+        if (count($prefixParts) === 2) {
+            $rowClosePos = strrpos($prefixParts[1], '</row>');
+            if ($rowClosePos !== false) {
+                $prefixParts[1] = substr($prefixParts[1], 0, $rowClosePos)
+                    . $extraHeaders
+                    . substr($prefixParts[1], $rowClosePos);
+            }
+        }
+
         $parts = [
             'first_column' => $matches[1],
-            'last_column' => $matches[3],
+            'last_column' => $newLastColumn,
             'header_row_count' => (int) $matches[4],
-            'column_count' => $this->columnIndexFromLetters($matches[3]) + 1,
-            'sheet_prefix' => $sheetDataParts[0],
+            'column_count' => $newColumnCount,
+            'sheet_prefix' => implode($headerRowTag, $prefixParts) ?: $sheetDataParts[0],
             'sheet_suffix' => '</sheetData>' . $sheetDataParts[1],
         ];
 
@@ -680,7 +715,7 @@ class ProductExportService
         static $numericColumns = null;
 
         if ($numericColumns === null) {
-            $numericColumns = array_fill_keys([7, 14, 15, 16, 46, 47, 48, 49, 50, 53, 54], true);
+            $numericColumns = array_fill_keys([7, 14, 15, 16, 46, 47, 48, 49, 50, 53, 54, 55], true);
         }
 
         return isset($numericColumns[$columnIndex]);
@@ -786,6 +821,8 @@ class ProductExportService
         $row[52] = $this->firstNonEmpty([$this->extractRawField($product, ['type_of_logistics', 'logistics_type']), $product->shop ? (string) ($product->shop->logistics_route ?? '') : '']);
         $row[53] = $product->bulk_discount !== null ? (string) $product->bulk_discount : '';
         $row[54] = $product->bulk_order !== null ? (string) $product->bulk_order : '';
+        $row[55] = (string) ($product->category_id ?? '');
+        $row[56] = (string) ($product->category_name ?? '');
 
         return $row;
     }

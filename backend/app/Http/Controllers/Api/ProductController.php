@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\RunProductExportTask;
+use App\Models\AliCategory;
 use App\Models\AliCategoryProperty;
 use App\Models\AliCategoryPropertyValue;
 use App\Models\Product;
@@ -93,7 +94,7 @@ class ProductController extends Controller
         $shopMap = $this->cachedShopMap();
         $catIds = $items->pluck('category_id')->unique()->filter()->all();
         $catNameMap = !empty($catIds)
-            ? \App\Models\AliCategory::whereIn('category_id', $catIds)->pluck('name', 'category_id')
+            ? AliCategory::whereIn('category_id', $catIds)->pluck('name', 'category_id')
             : collect();
 
         $items = $items->map(function ($p) use ($shopMap, $catNameMap) {

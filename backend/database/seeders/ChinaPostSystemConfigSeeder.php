@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\SystemConfig;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 
@@ -132,5 +133,7 @@ class ChinaPostSystemConfigSeeder extends Seeder
                 $config
             );
         }
+
+        SystemConfig::clearCache('chinapost');
     }
 }

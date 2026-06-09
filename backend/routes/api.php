@@ -81,6 +81,9 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     // 物流作用域配置（用户/团队）
     Route::post('/logistics-configs/current', [LogisticsConfigController::class, 'current']);
     Route::post('/logistics-configs/save', [LogisticsConfigController::class, 'save']);
+    Route::post('/logistics-configs/test/sz56t/connect', [LogisticsConfigController::class, 'testSz56tConnect']);
+    Route::post('/logistics-configs/test/chinapost/create-order', [LogisticsConfigController::class, 'testChinaPostCreateOrder']);
+    Route::post('/logistics-configs/test/chinapost/label', [LogisticsConfigController::class, 'testChinaPostLabel']);
 
     // 数据字典
     Route::post('/dict-types/list', [DictController::class, 'typeIndex']);

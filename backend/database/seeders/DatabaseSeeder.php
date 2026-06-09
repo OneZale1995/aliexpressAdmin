@@ -140,21 +140,29 @@ class DatabaseSeeder extends Seeder
             ['group' => 'finance', 'key' => 'estimated_receipt_rate', 'name' => '预估回款比例', 'value' => '0.908', 'type' => 'number', 'description' => '用于计算预估回款，公式：销售额 × 比例', 'sort' => 2],
 
             // 中国邮政配置
-            ['group' => 'chinapost', 'key' => 'env', 'name' => '运行环境', 'value' => 'test', 'type' => 'select', 'options' => 'test:测试环境,production:正式环境', 'description' => '切换测试/正式环境', 'sort' => 1],
-            ['group' => 'chinapost', 'key' => 'test_base_url', 'name' => '测试环境地址', 'value' => '', 'type' => 'text', 'description' => '测试环境API基础地址', 'sort' => 2],
-            ['group' => 'chinapost', 'key' => 'test_authorization', 'name' => '测试环境授权码', 'value' => '', 'type' => 'text', 'description' => '测试环境协议客户授权码', 'sort' => 3],
-            ['group' => 'chinapost', 'key' => 'test_digest_key', 'name' => '测试环境SM4密钥', 'value' => '', 'type' => 'text', 'description' => '测试环境SM4加密密钥(Base64)', 'sort' => 4],
-            ['group' => 'chinapost', 'key' => 'test_api_path', 'name' => '测试环境API路径', 'value' => '', 'type' => 'text', 'description' => '测试环境开放平台接口路径', 'sort' => 5],
-            ['group' => 'chinapost', 'key' => 'prod_base_url', 'name' => '正式环境地址', 'value' => '', 'type' => 'text', 'description' => '正式环境API基础地址', 'sort' => 6],
-            ['group' => 'chinapost', 'key' => 'prod_authorization', 'name' => '正式环境授权码', 'value' => '', 'type' => 'text', 'description' => '正式环境协议客户授权码', 'sort' => 7],
-            ['group' => 'chinapost', 'key' => 'prod_digest_key', 'name' => '正式环境SM4密钥', 'value' => '', 'type' => 'text', 'description' => '正式环境SM4加密密钥(Base64)', 'sort' => 8],
-            ['group' => 'chinapost', 'key' => 'prod_api_path', 'name' => '正式环境API路径', 'value' => '', 'type' => 'text', 'description' => '正式环境开放平台接口路径', 'sort' => 9],
-            ['group' => 'chinapost', 'key' => 'agreement_code', 'name' => '协议大客户号', 'value' => '', 'type' => 'text', 'description' => '协议大客户号(ecCompanyId)', 'sort' => 10],
-            ['group' => 'chinapost', 'key' => 'ecommerce_flag', 'name' => '电商标识', 'value' => '', 'type' => 'text', 'description' => '电商标识(mailType)', 'sort' => 11],
-            ['group' => 'chinapost', 'key' => 'pickup_org_code', 'name' => '揽收机构编号', 'value' => '', 'type' => 'text', 'description' => '揽收机构编号(whCode)', 'sort' => 12],
-            ['group' => 'chinapost', 'key' => 'eub_product_code', 'name' => 'EUB产品代码', 'value' => '', 'type' => 'text', 'description' => '业务产品编号(biz_product_no)', 'sort' => 13],
-            ['group' => 'chinapost', 'key' => 'label_ak', 'name' => '面单AK', 'value' => '', 'type' => 'text', 'description' => '获取面单接口AK', 'sort' => 14],
+            ['group' => 'chinapost', 'key' => 'test_api_url', 'name' => '测试环境地址', 'value' => 'https://api.ems.com.cn/amp-prod-api/f/amp/api/test', 'type' => 'text', 'description' => '沙箱测试接口完整地址', 'sort' => 0],
+            ['group' => 'chinapost', 'key' => 'api_url', 'name' => '正式环境地址', 'value' => 'https://api.ems.com.cn/amp-prod-api/f/amp/api/open', 'type' => 'text', 'description' => '生产接口完整地址', 'sort' => 1],
+            ['group' => 'chinapost', 'key' => 'test_authorization', 'name' => '测试授权码', 'value' => '', 'type' => 'text', 'description' => '测试环境授权码（仅用于配置验证，团队/用户可覆盖）', 'sort' => 2],
+            ['group' => 'chinapost', 'key' => 'test_digest_key', 'name' => '测试签名密钥', 'value' => '', 'type' => 'text', 'description' => '测试环境SM4签名密钥（仅用于配置验证，团队/用户可覆盖）', 'sort' => 3],
+            ['group' => 'chinapost', 'key' => 'prod_authorization', 'name' => '正式授权码', 'value' => '', 'type' => 'text', 'description' => '正式环境授权码（实际业务使用，团队/用户可覆盖）', 'sort' => 4],
+            ['group' => 'chinapost', 'key' => 'prod_digest_key', 'name' => '正式签名密钥', 'value' => '', 'type' => 'text', 'description' => '正式环境SM4签名密钥（实际业务使用，团队/用户可覆盖）', 'sort' => 5],
+            ['group' => 'chinapost', 'key' => 'agreement_code', 'name' => '协议大客户号', 'value' => '', 'type' => 'text', 'description' => '协议大客户号(ecCompanyId)', 'sort' => 6],
+            ['group' => 'chinapost', 'key' => 'ecommerce_flag', 'name' => '电商标识', 'value' => '', 'type' => 'text', 'description' => '电商标识(mailType)', 'sort' => 7],
+            ['group' => 'chinapost', 'key' => 'pickup_org_code', 'name' => '揽收机构编号', 'value' => '', 'type' => 'text', 'description' => '揽收机构编号(whCode)', 'sort' => 8],
+            ['group' => 'chinapost', 'key' => 'eub_product_code', 'name' => 'EUB产品代码', 'value' => '', 'type' => 'text', 'description' => '业务产品编号(biz_product_no)', 'sort' => 9],
+            ['group' => 'chinapost', 'key' => 'label_ak', 'name' => '面单AK', 'value' => '8nVV209U16ml9q63', 'type' => 'text', 'description' => '获取面单接口AK（系统级统一配置）', 'sort' => 10],
         ];
+
+        // 清理中国邮政废弃的环境切换及旧URL参数
+        SystemConfig::where('group', 'chinapost')
+            ->whereIn('key', [
+                'env',
+                'test_base_url',
+                'test_api_path',
+                'prod_base_url',
+                'prod_api_path',
+            ])
+            ->delete();
 
         foreach ($defaultConfigs as $config) {
             SystemConfig::firstOrCreate(['key' => $config['key']], $config);

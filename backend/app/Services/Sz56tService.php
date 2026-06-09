@@ -27,15 +27,31 @@ class Sz56tService
         $resolved = $resolver->resolveForOrder($order, LogisticsConfigResolver::PROVIDER_SZ56T);
         $scopeConfig = is_array($resolved['config'] ?? null) ? $resolved['config'] : [];
 
-        $this->apiUrl = rtrim($config['api_url'] ?? 'http://139.199.207.170:8082', '/');
-        $this->labelUrl = rtrim($config['label_url'] ?? 'http://139.199.207.170:8089', '/');
-        $this->cancelApiUrl = $config['cancel_api_url'] ?? 'http://139.199.207.170:8082/logistics/api';
-        $this->cancelAuth = $config['cancel_auth'] ?? '';
-        $this->username = (string) ($scopeConfig['username'] ?? ($config['username'] ?? ''));
-        $this->password = (string) ($scopeConfig['password'] ?? ($config['password'] ?? ''));
-        $this->customerId = $config['customer_id'] ?? null;
-        $this->customerUserid = $config['customer_userid'] ?? null;
-        $this->tradeType = $config['trade_type'] ?? 'ZYXT';
+        $this->init($config, $scopeConfig);
+    }
+
+    /**
+     * 从指定作用域配置创建实例（用于测试连接，无需 Order）
+     */
+    public static function fromScopeConfig(array $scopeConfig): self
+    {
+        $instance = new self(null);
+        $config = config('services.sz56t', []);
+        $instance->init($config, $scopeConfig);
+        return $instance;
+    }
+
+    private function init(array $systemConfig, array $scopeConfig): void
+    {
+        $this->apiUrl = rtrim($systemConfig['api_url'] ?? 'http://139.199.207.170:8082', '/');
+        $this->labelUrl = rtrim($systemConfig['label_url'] ?? 'http://139.199.207.170:8089', '/');
+        $this->cancelApiUrl = $systemConfig['cancel_api_url'] ?? 'http://139.199.207.170:8082/logistics/api';
+        $this->cancelAuth = $systemConfig['cancel_auth'] ?? '';
+        $this->username = (string) ($scopeConfig['username'] ?? ($systemConfig['username'] ?? ''));
+        $this->password = (string) ($scopeConfig['password'] ?? ($systemConfig['password'] ?? ''));
+        $this->customerId = $systemConfig['customer_id'] ?? null;
+        $this->customerUserid = $systemConfig['customer_userid'] ?? null;
+        $this->tradeType = $systemConfig['trade_type'] ?? 'ZYXT';
     }
 
     protected function thirdPartyLog()
@@ -196,6 +212,124 @@ class Sz56tService
                 'order_id' => $order->ae_order_id,
                 'product_id' => $productId,
                 'param' => $param,
+                'message' => $e->getMessage(),
+            ]);
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * 测试创建订单（不依赖真实 Order，用于物流配置验证）
+     */
+    public function testCreateOrder(array $testData): array
+    {
+        if (!$this->ensureAuth()) {
+            return ['success' => false, 'message' => 'sz56t认证失败，请检查账号密码配置'];
+        }
+
+        $productId = trim((string) ($testData['product_id'] ?? ''));
+        if ($productId === '') {
+            return ['success' => false, 'message' => '请提供 product_id（雷翼运输方式ID）'];
+        }
+
+        $country = strtoupper(trim((string) ($testData['country'] ?? 'RU')));
+        $consigneeName = trim((string) ($testData['consignee_name'] ?? 'Test User'));
+        $consigneeAddress = trim((string) ($testData['consignee_address'] ?? 'Test Address, Moscow'));
+        $consigneeTelephone = trim((string) ($testData['consignee_telephone'] ?? '79991234567'));
+        $consigneeCity = trim((string) ($testData['consignee_city'] ?? 'Moscow'));
+        $consigneeState = trim((string) ($testData['consignee_state'] ?? 'Moscow'));
+        $consigneePostcode = trim((string) ($testData['consignee_postcode'] ?? '101000'));
+        $orderCustomerInvoiceCode = trim((string) ($testData['order_customerinvoicecode'] ?? ('TEST-' . date('YmdHis') . '-' . rand(1000, 9999))));
+
+        $invoiceItems = $testData['invoice_items'] ?? [];
+        if (!is_array($invoiceItems) || empty($invoiceItems)) {
+            $invoiceItems = [
+                [
+                    'invoice_title' => 'Test Product',
+                    'invoice_amount' => 1.00,
+                    'invoice_pcs' => 1,
+                    'invoice_weight' => 0.5,
+                    'invoice_currency' => 'USD',
+                    'origin_country' => 'CN',
+                    'invoiceunit_code' => 'PCS',
+                    'invoice_export_currency' => 'USD',
+                ],
+            ];
+        }
+
+        $param = [
+            'customer_id' => $this->customerId,
+            'customer_userid' => $this->customerUserid,
+            'order_customerinvoicecode' => $orderCustomerInvoiceCode,
+            'product_id' => $productId,
+            'trade_type' => trim((string) ($testData['trade_type'] ?? $this->tradeType)) ?: $this->tradeType,
+            'order_piece' => (string) max(1, (int) ($testData['order_piece'] ?? 1)),
+            'order_returnsign' => 'N',
+            'cargo_type' => trim((string) ($testData['cargo_type'] ?? 'P')) ?: 'P',
+            'weight' => $testData['weight'] ?? 0.5,
+            'consignee_name' => $consigneeName,
+            'consignee_address' => $consigneeAddress,
+            'consignee_telephone' => $consigneeTelephone,
+            'consignee_mobile' => $consigneeTelephone,
+            'consignee_city' => $consigneeCity,
+            'consignee_state' => $consigneeState,
+            'consignee_postcode' => $consigneePostcode,
+            'country' => $country,
+            'consignee_email' => trim((string) ($testData['consignee_email'] ?? '')),
+            'orderInvoiceParam' => $invoiceItems,
+        ];
+
+        if ($length = $testData['length'] ?? null) $param['length'] = $length;
+        if ($width = $testData['width'] ?? null) $param['width'] = $width;
+        if ($height = $testData['height'] ?? null) $param['height'] = $height;
+
+        $paramJson = json_encode($param, JSON_UNESCAPED_UNICODE);
+
+        $this->thirdPartyLog()->info('Sz56t testCreateOrder request', [
+            'order_customerinvoicecode' => $orderCustomerInvoiceCode,
+            'product_id' => $productId,
+            'param' => $param,
+        ]);
+
+        try {
+            $response = Http::timeout(30)
+                ->asForm()
+                ->post($this->apiUrl . '/createOrderApi.htm', [
+                    'param' => $paramJson,
+                ]);
+
+            $data = $this->decodeResponse($response->body());
+
+            $this->thirdPartyLog()->info('Sz56t testCreateOrder response', ['response' => $data]);
+
+            if (isset($data['ack']) && $data['ack'] === 'true') {
+                $trackingNumber = $data['tracking_number'] ?? '';
+                $orderId = $data['order_id'] ?? '';
+                $isDelay = ($data['is_delay'] ?? '') === 'Y';
+
+                return [
+                    'success' => true,
+                    'message' => $isDelay ? '测试下单成功，单号延迟获取' : '测试下单成功',
+                    'tracking_number' => $trackingNumber,
+                    'order_id' => $orderId,
+                    'customer_id' => $this->customerId,
+                    'customer_userid' => $this->customerUserid,
+                    'is_delay' => $isDelay,
+                    'reference_number' => $data['reference_number'] ?? '',
+                    'order_customerinvoicecode' => $orderCustomerInvoiceCode,
+                    'raw' => $data,
+                ];
+            }
+
+            $message = urldecode($data['message'] ?? '');
+            return [
+                'success' => false,
+                'message' => '测试下单失败: ' . ($message ?: json_encode($data)),
+                'raw' => $data,
+            ];
+        } catch (\Exception $e) {
+            $this->thirdPartyLog()->error('Sz56t testCreateOrder exception', [
+                'product_id' => $productId,
                 'message' => $e->getMessage(),
             ]);
             return ['success' => false, 'message' => $e->getMessage()];

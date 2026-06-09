@@ -49,7 +49,9 @@ return [
     ],
 
     'chinapost' => [
-        'base_url' => env('CHINAPOST_BASE_URL', 'https://211.156.197.248:443'),
+        'base_url' => env('CHINAPOST_BASE_URL', 'https://api.ems.com.cn'),
+        'test_api_url' => env('CHINAPOST_TEST_API_URL', 'https://api.ems.com.cn/amp-prod-api/f/amp/api/test'),
+        'api_url' => env('CHINAPOST_API_URL', 'https://api.ems.com.cn/amp-prod-api/f/amp/api/open'),
         'ec_company_id' => env('CHINAPOST_EC_COMPANY_ID', ''),
         'authorization' => env('CHINAPOST_AUTHORIZATION', ''),
         'digest_key' => env('CHINAPOST_DIGEST_KEY', ''),
@@ -62,8 +64,6 @@ return [
             'get_label' => env('CHINAPOST_API_CODE_GET_LABEL', '120001'),
         ],
         'paths' => [
-            'open_api' => env('CHINAPOST_PATH_OPEN_API', '/amp-prod-api/f/amp/api/open'),
-            'surface_download' => env('CHINAPOST_PATH_SURFACE_DOWNLOAD', '/pcpErp-web/a/pcp/surface/download'),
             'cancel_order' => env('CHINAPOST_PATH_CANCEL_ORDER', '/pcpErp-web/a/pcp/orderService/cancelOrder'),
             'order_fee' => env('CHINAPOST_PATH_ORDER_FEE', '/pcpErp-web/a/pcp/orderFeeService/getOrderFee'),
         ],
@@ -95,7 +95,7 @@ return [
             'item_unit' => env('CHINAPOST_ITEM_UNIT', '个'),
             'barcode_logistics_company' => env('CHINAPOST_BARCODE_LOGISTICS_COMPANY', 'POST'),
             'barcode_face_type' => env('CHINAPOST_BARCODE_FACE_TYPE', '1'),
-            'label_ak' => env('CHINAPOST_LABEL_AK', ''),
+            'label_ak' => env('CHINAPOST_LABEL_AK', '8nVV209U16ml9q63'),
         ],
         'sender' => [
             'name' => env('CHINAPOST_SENDER_NAME', ''),

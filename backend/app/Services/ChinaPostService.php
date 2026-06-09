@@ -12,6 +12,8 @@ use App\Models\SystemConfig;
 class ChinaPostService
 {
     protected string $baseUrl;
+    protected string $apiUrl;
+    protected string $testApiUrl;
     protected string $ecCompanyId;
     protected string $authorization;
     protected string $digestKey;
@@ -42,23 +44,19 @@ class ChinaPostService
 
         $sys = $this->mergeScopeConfigToSystemConfig($sys, $scopeConfig);
 
-        $isProduction = ($sys['env'] ?? 'test') === 'production';
-        $envPrefix = $isProduction ? 'prod_' : 'test_';
+        $this->baseUrl = $config['base_url'] ?? 'https://api.ems.com.cn';
+        $this->apiUrl = $sys['api_url'] ?? $config['api_url'] ?? 'https://api.ems.com.cn/amp-prod-api/f/amp/api/open';
+        $this->testApiUrl = $sys['test_api_url'] ?? $config['test_api_url'] ?? 'https://api.ems.com.cn/amp-prod-api/f/amp/api/test';
 
-        if (!empty($sys[$envPrefix . 'base_url'])) {
-            $this->baseUrl = $sys[$envPrefix . 'base_url'];
-        } else {
-            $this->baseUrl = $config['base_url'] ?? 'https://211.156.197.248:443';
-        }
-
-        if (!empty($sys[$envPrefix . 'authorization'])) {
-            $this->authorization = $sys[$envPrefix . 'authorization'];
+        // 业务默认使用正式凭证
+        if (!empty($sys['prod_authorization'])) {
+            $this->authorization = $sys['prod_authorization'];
         } else {
             $this->authorization = $config['authorization'] ?? '';
         }
 
-        if (!empty($sys[$envPrefix . 'digest_key'])) {
-            $this->digestKey = $sys[$envPrefix . 'digest_key'];
+        if (!empty($sys['prod_digest_key'])) {
+            $this->digestKey = $sys['prod_digest_key'];
         } else {
             $this->digestKey = $config['digest_key'] ?? '';
         }
@@ -70,10 +68,6 @@ class ChinaPostService
         $this->apiCodes = $config['api_codes'] ?? [];
         $this->paths = $config['paths'] ?? [];
         $this->publicConfig = $config['public'] ?? [];
-
-        if (!empty($sys[$envPrefix . 'api_path'])) {
-            $this->paths['open_api'] = $sys[$envPrefix . 'api_path'];
-        }
 
         // 系统配置优先覆盖
         if (!empty($sys['eub_product_code'])) {
@@ -123,7 +117,6 @@ class ChinaPostService
             'prod_digest_key' => 'prod_digest_key',
             'agreement_code' => 'agreement_code',
             'pickup_org_code' => 'pickup_org_code',
-            'label_ak' => 'label_ak',
         ];
 
         foreach ($map as $sourceKey => $targetKey) {
@@ -140,6 +133,288 @@ class ChinaPostService
         }
 
         return $systemConfig;
+    }
+
+    /**
+     * 测试下单 — 使用测试凭证创建测试订单
+     * @param array|null $scopeSys 可选，scope 合并后的系统配置
+     */
+    public function testCreateOrder(?array $scopeSys = null): array
+    {
+        $sys = $scopeSys ?? SystemConfig::getByGroup('chinapost');
+        $testAuth = $sys['test_authorization'] ?? '';
+        $testKey = $sys['test_digest_key'] ?? '';
+
+        if ($testAuth === '') {
+            return ['success' => false, 'message' => '未配置测试授权码，请先在物流配置中填写并保存'];
+        }
+        if ($testKey === '') {
+            return ['success' => false, 'message' => '未配置测试签名密钥，请先在物流配置中填写并保存'];
+        }
+
+        $senderNo = $sys['agreement_code'] ?? $this->ecCompanyId;
+        if ($senderNo === '') {
+            return ['success' => false, 'message' => '未配置协议大客户号'];
+        }
+
+        $unit = $this->public('item_unit', '个');
+        $testPayload = [
+            'created_time' => now()->format('Y-m-d H:i:s'),
+            'sender_no' => $senderNo,
+            'mailType' => $sys['ecommerce_flag'] ?? $this->mailType,
+            'wh_code' => $sys['pickup_org_code'] ?? $this->whCode,
+            'logistics_order_no' => 'TEST-' . date('YmdHis') . '-' . rand(1000, 9999),
+            'batch_no' => '',
+            'waybill_no' => '',
+            'biz_product_no' => $sys['eub_product_code'] ?? $this->public('biz_product_no', '019'),
+            'weight' => 100,
+            'volume' => null,
+            'length' => null,
+            'width' => null,
+            'height' => null,
+            'postage_total' => null,
+            'postage_currency' => 'USD',
+            'contents_total_weight' => 100,
+            'contents_total_value' => 1,
+            'transfer_type' => $this->public('transfer_type', 'HK'),
+            'battery_flag' => $this->public('battery_flag', '0'),
+            'pickup_notes' => '',
+            'insurance_flag' => (string) $this->public('insurance_flag', ''),
+            'insurance_amount' => null,
+            'undelivery_option' => (string) $this->public('undelivery_option', 2),
+            'back_addr' => (string) $this->public('back_addr', ''),
+            'back_way' => (string) $this->public('back_way', '1'),
+            'valuable_flag' => (string) $this->public('valuable_flag', '0'),
+            'declare_source' => (string) $this->public('declare_source', '2'),
+            'declare_type' => (string) $this->public('declare_type', '1'),
+            'declare_curr_code' => 'USD',
+            'printcode' => (string) $this->public('printcode', '0'),
+            'barcode' => 'TEST-BARCODE-' . rand(10000, 99999),
+            'forecastshut' => (string) $this->public('forecastshut', '0'),
+            'mail_sign' => (string) $this->public('mail_sign', '2'),
+            'mail_flag' => (string) $this->public('mail_flag', '0'),
+            'tax_id' => '',
+            's_tax_id' => '',
+            'prepayment_of_vat' => '',
+            'pickup_flag' => '0',
+            'sender' => [
+                'name' => $this->defaultSender['name'] ?: '测试寄件人',
+                'company' => $this->defaultSender['company'] ?: '测试公司',
+                'post_code' => $this->defaultSender['post_code'] ?: '100000',
+                'phone' => $this->defaultSender['phone'] ?: '8613800000000',
+                'mobile' => $this->defaultSender['mobile'] ?: '8613800000001',
+                'email' => $this->defaultSender['email'] ?: '',
+                'id_type' => $this->defaultSender['id_type'] ?: '',
+                'id_no' => $this->defaultSender['id_no'] ?: '',
+                'nation' => $this->defaultSender['nation'] ?: 'CN',
+                'province' => $this->defaultSender['province'] ?: '广东省',
+                'city' => $this->defaultSender['city'] ?: '深圳市',
+                'county' => $this->defaultSender['county'] ?: '',
+                'address' => $this->defaultSender['address'] ?: '测试街道100号',
+                'gis' => $this->defaultSender['gis'] ?: '',
+                'linker' => $this->defaultSender['linker'] ?: '测试寄件人',
+            ],
+            'receiver' => [
+                'name' => 'Test User',
+                'company' => '',
+                'post_code' => '101000',
+                'phone' => '13800000000',
+                'mobile' => '13800000000',
+                'email' => '',
+                'id_type' => '',
+                'id_no' => '',
+                'nation' => 'RU',
+                'province' => 'Moscow',
+                'city' => 'Moscow',
+                'county' => '',
+                'address' => 'Test Address 123',
+                'gis' => '',
+                'linker' => 'Test User',
+            ],
+            'items' => [[
+                'cargo_no' => '1',
+                'cargo_name' => '测试商品',
+                'cargo_name_en' => 'Test Product',
+                'cargo_type_name' => '测试商品',
+                'cargo_type_name_en' => 'Test Product',
+                'cargo_origin_name' => 'CN',
+                'cargo_link' => '',
+                'cargo_quantity' => 1,
+                'cargo_value' => 1,
+                'cost' => 1,
+                'cargo_currency' => 'USD',
+                'carogo_weight' => 100,
+                'cargo_weight' => 100,
+                'cargo_description' => 'Test Product',
+                'cargo_serial' => '',
+                'unit' => $unit,
+                'intemsize' => '',
+            ]],
+        ];
+
+        $jsonContent = json_encode($testPayload, JSON_UNESCAPED_UNICODE);
+        $encrypted = $this->encryptLogitcsInterface($jsonContent, $testKey);
+        if ($encrypted === null) {
+            return ['success' => false, 'message' => '报文加密失败，请检查测试签名密钥格式(Base64,16字节SM4)'];
+        }
+
+        $params = [
+            'apiCode' => (string) ($this->apiCodes['create_order'] ?? '110001'),
+            'senderNo' => $senderNo,
+            'authorization' => $testAuth,
+            'msgType' => $this->public('open_msg_type', '0'),
+            'timeStamp' => now()->format('Y-m-d H:i:s'),
+            'version' => $this->public('open_version', 'V1.0.0'),
+            'logitcsInterface' => $encrypted,
+            'productType' => $this->public('product_type', 'E邮宝'),
+            'biz_product_no' => $this->public('biz_product_no', '019'),
+        ];
+
+        $this->thirdPartyLog()->info('ChinaPost testCreateOrder request', [
+            'url' => $this->testApiUrl,
+            'sender_no' => $senderNo,
+        ]);
+
+        try {
+            $response = Http::asForm()
+                ->withOptions(['verify' => $this->verifySsl])
+                ->timeout(30)
+                ->post($this->testApiUrl, $params);
+
+            $data = $response->json();
+            $retBody = $this->decodeRetBody($data['retBody'] ?? null);
+
+            $this->thirdPartyLog()->info('ChinaPost testCreateOrder response', [
+                'status' => $response->status(),
+                'response' => $data,
+            ]);
+
+            if (!empty($data['success']) && (($data['retCode'] ?? '') === '00000' || ($data['retCode'] ?? '') === '')) {
+                $waybillNo = (string) (
+                    data_get($retBody, 'waybill_no')
+                    ?? data_get($retBody, 'waybillNo')
+                    ?? data_get($retBody, 'cbWaybillNo')
+                    ?? ''
+                );
+                return [
+                    'success' => true,
+                    'message' => '测试下单成功',
+                    'waybill_no' => $waybillNo,
+                    'ret_code' => $data['retCode'] ?? '',
+                ];
+            }
+
+            $retMsg = $data['retMsg'] ?? '';
+            return [
+                'success' => false,
+                'message' => '测试下单失败: ' . ($retMsg ?: ('retCode=' . ($data['retCode'] ?? '未知'))),
+                'ret_code' => $data['retCode'] ?? '',
+            ];
+        } catch (\Exception $e) {
+            $this->thirdPartyLog()->error('ChinaPost testCreateOrder exception', [
+                'message' => $e->getMessage(),
+            ]);
+            return ['success' => false, 'message' => '测试下单异常: ' . $e->getMessage()];
+        }
+    }
+
+    /**
+     * 测试获取面单 — 使用测试凭证获取指定运单号的面单
+     * @param array|null $scopeSys 可选，scope 合并后的系统配置
+     */
+    public function testGetLabel(string $waybillNo, ?array $scopeSys = null): array
+    {
+        $sys = $scopeSys ?? SystemConfig::getByGroup('chinapost');
+        $testAuth = $sys['test_authorization'] ?? '';
+        $testKey = $sys['test_digest_key'] ?? '';
+
+        if ($testAuth === '') {
+            return ['success' => false, 'message' => '未配置测试授权码'];
+        }
+        if ($testKey === '') {
+            return ['success' => false, 'message' => '未配置测试签名密钥'];
+        }
+        if ($waybillNo === '') {
+            return ['success' => false, 'message' => '缺少运单号，请先执行测试下单'];
+        }
+
+        $senderNo = $sys['agreement_code'] ?? $this->ecCompanyId;
+        $ecCompanyId = $senderNo;
+        $pageType = $this->public('page_type', 'RM');
+        $labelVersion = $this->public('label_version', '2');
+        $labelAk = $sys['label_ak'] ?? $this->public('label_ak', '');
+
+        $logisticsInterface = [
+            'ecCompanyId' => $ecCompanyId,
+            'ak' => $labelAk,
+            'barCode' => $waybillNo,
+            'version' => $labelVersion,
+            'pageType' => $pageType,
+        ];
+
+        $encryptedLogitcsInterface = $this->encryptLogitcsInterface(
+            json_encode($logisticsInterface, JSON_UNESCAPED_UNICODE),
+            $testKey
+        );
+
+        if ($encryptedLogitcsInterface === null) {
+            return ['success' => false, 'message' => '报文加密失败，请检查测试签名密钥格式'];
+        }
+
+        $params = [
+            'apiCode' => (string) ($this->apiCodes['get_label'] ?? '120001'),
+            'senderNo' => $senderNo,
+            'authorization' => $testAuth,
+            'msgType' => $this->public('open_msg_type', '0'),
+            'timeStamp' => now()->format('Y-m-d H:i:s'),
+            'version' => $this->public('open_version', 'V1.0.0'),
+            'logitcsInterface' => $encryptedLogitcsInterface,
+        ];
+
+        $this->thirdPartyLog()->info('ChinaPost testGetLabel request', [
+            'waybill_no' => $waybillNo,
+            'sender_no' => $senderNo,
+        ]);
+
+        try {
+            $response = Http::asForm()
+                ->withOptions(['verify' => $this->verifySsl])
+                ->timeout(30)
+                ->post($this->testApiUrl, $params);
+
+            $data = $response->json();
+
+            $this->thirdPartyLog()->info('ChinaPost testGetLabel response', [
+                'status' => $response->status(),
+                'waybill_no' => $waybillNo,
+                'response_keys' => is_array($data) ? array_keys($data) : 'not_array',
+            ]);
+
+            if (!empty($data['success']) && (($data['retCode'] ?? '') === '00000' || ($data['retCode'] ?? '') === '')) {
+                $retBody = $this->decodeRetBody($data['retBody'] ?? null);
+                $labelContent = data_get($retBody, 'labelContent') ?? data_get($retBody, 'label_content') ?? '';
+                return [
+                    'success' => true,
+                    'message' => '测试获取面单成功',
+                    'waybill_no' => $waybillNo,
+                    'has_label' => $labelContent !== '',
+                    'ret_code' => $data['retCode'] ?? '',
+                ];
+            }
+
+            $retMsg = $data['retMsg'] ?? '';
+            return [
+                'success' => false,
+                'message' => '测试获取面单失败: ' . ($retMsg ?: ('retCode=' . ($data['retCode'] ?? '未知'))),
+                'ret_code' => $data['retCode'] ?? '',
+            ];
+        } catch (\Exception $e) {
+            $this->thirdPartyLog()->error('ChinaPost testGetLabel exception', [
+                'waybill_no' => $waybillNo,
+                'message' => $e->getMessage(),
+            ]);
+            return ['success' => false, 'message' => '测试获取面单异常: ' . $e->getMessage()];
+        }
     }
 
     protected function thirdPartyLog()
@@ -286,7 +561,7 @@ class ChinaPostService
             return ['success' => false, 'message' => 'logitcsInterface 加密失败，请检查 CHINAPOST_DIGEST_KEY 是否正确'];
         }
 
-        $url = $this->path('open_api', '/amp-prod-api/f/amp/api/open');
+        $url = $this->apiUrl;
         $params = [
             'apiCode' => (string) $apiCode,
             'senderNo' => $senderNo,
@@ -411,7 +686,7 @@ class ChinaPostService
             return ['success' => false, 'message' => 'logitcsInterface 加密失败，请检查 CHINAPOST_DIGEST_KEY 是否正确'];
         }
 
-        $url = $this->path('open_api', '/amp-prod-api/f/amp/api/open');
+        $url = $this->apiUrl;
         $params = [
             'apiCode' => (string) $apiCode,
             'senderNo' => $senderNo,
@@ -529,7 +804,7 @@ class ChinaPostService
             return ['success' => false, 'message' => 'logitcsInterface 加密失败，请检查 CHINAPOST_DIGEST_KEY 是否正确'];
         }
 
-        $url = $this->path('open_api', '/amp-prod-api/f/amp/api/open');
+        $url = $this->apiUrl;
         $params = [
             'apiCode' => (string) $apiCode,
             'senderNo' => $senderNo,

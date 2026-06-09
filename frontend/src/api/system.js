@@ -144,6 +144,18 @@ export function saveLogisticsConfig(data) {
   return request({ url: '/logistics-configs/save', method: 'post', data })
 }
 
+export function testSz56tConnect(data) {
+  return request({ url: '/logistics-configs/test/sz56t/connect', method: 'post', data })
+}
+
+export function testChinaPostCreateOrder(data) {
+  return request({ url: '/logistics-configs/test/chinapost/create-order', method: 'post', data })
+}
+
+export function testChinaPostLabel(data) {
+  return request({ url: '/logistics-configs/test/chinapost/label', method: 'post', data })
+}
+
 // ========== 数据字典 ==========
 export function fetchDictTypeList(data) {
   return request({ url: '/dict-types/list', method: 'post', data })

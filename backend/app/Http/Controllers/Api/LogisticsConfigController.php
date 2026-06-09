@@ -7,7 +7,9 @@ use App\Models\LogisticsConfig;
 use App\Models\SystemConfig;
 use App\Models\Team;
 use App\Models\User;
+use App\Services\ChinaPostService;
 use App\Services\LogisticsConfigResolver;
+use App\Services\Sz56tService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
 
@@ -123,6 +125,151 @@ class LogisticsConfigController extends Controller
             'enabled' => (bool) $record->enabled,
             'config' => array_merge($resolver->providerDefaultConfig($provider), is_array($record->config) ? $record->config : []),
         ], '保存成功');
+    }
+
+    // ========== 配置测试接口 ==========
+
+    /**
+     * 测试雷翼连接 — 调用 selectAuth.htm 验证账号密码
+     */
+    public function testSz56tConnect(Request $request, LogisticsConfigResolver $resolver)
+    {
+        $user = $request->user();
+        $scopeType = $request->input('scope_type', 'team');
+        $scopeId = $this->resolveTestScopeId($request, $user, $scopeType);
+
+        if (!$scopeId) {
+            return $this->error('无法确定测试作用域，请选择团队或用户');
+        }
+
+        $resolved = $resolver->resolveForScope($scopeType, (int) $scopeId, LogisticsConfigResolver::PROVIDER_SZ56T);
+        $scopeConfig = $resolved['config'] ?? [];
+
+        $service = Sz56tService::fromScopeConfig($scopeConfig);
+        $result = $service->authenticate();
+
+        if ($result['success']) {
+            return $this->success([
+                'customer_id' => $result['customer_id'] ?? '',
+                'customer_userid' => $result['customer_userid'] ?? '',
+            ], '雷翼认证成功 — 配置正确');
+        }
+
+        return $this->error($result['message'] ?? '雷翼认证失败，请检查账号密码');
+    }
+
+    /**
+     * 测试中国邮政下单 — 使用测试凭证创建测试订单
+     */
+    public function testChinaPostCreateOrder(Request $request)
+    {
+        $scopeType = $request->input('scope_type', 'team');
+        $scopeId = $this->resolveScopeIdForTest($request, $scopeType);
+        if (!$scopeId) {
+            return $this->error('无法确定测试作用域');
+        }
+
+        $sys = $this->buildTestChinapostConfig($scopeType, (int) $scopeId);
+        if (empty($sys['test_authorization'])) {
+            return $this->error('未配置测试授权码，请先在物流配置中填写并保存');
+        }
+        if (empty($sys['test_digest_key'])) {
+            return $this->error('未配置测试签名密钥，请先在物流配置中填写并保存');
+        }
+
+        $service = new ChinaPostService();
+        $result = $service->testCreateOrder($sys);
+
+        if ($result['success']) {
+            return $this->success([
+                'waybill_no' => $result['waybill_no'] ?? '',
+            ], $result['message'] ?? '测试下单成功');
+        }
+
+        return $this->error($result['message'] ?? '测试下单失败');
+    }
+
+    /**
+     * 测试中国邮政获取面单 — 使用测试凭证获取指定运单号的面单
+     */
+    public function testChinaPostLabel(Request $request)
+    {
+        $scopeType = $request->input('scope_type', 'team');
+        $scopeId = $this->resolveScopeIdForTest($request, $scopeType);
+        if (!$scopeId) {
+            return $this->error('无法确定测试作用域');
+        }
+
+        $waybillNo = trim((string) $request->input('waybill_no', ''));
+        if ($waybillNo === '') {
+            return $this->error('请先执行测试下单获取运单号');
+        }
+
+        $sys = $this->buildTestChinapostConfig($scopeType, (int) $scopeId);
+        if (empty($sys['test_authorization'])) {
+            return $this->error('未配置测试授权码，请先在物流配置中填写并保存');
+        }
+        if (empty($sys['test_digest_key'])) {
+            return $this->error('未配置测试签名密钥，请先在物流配置中填写并保存');
+        }
+
+        $service = new ChinaPostService();
+        $result = $service->testGetLabel($waybillNo, $sys);
+
+        if ($result['success']) {
+            return $this->success([
+                'waybill_no' => $result['waybill_no'] ?? '',
+                'has_label' => $result['has_label'] ?? false,
+            ], $result['message'] ?? '测试获取面单成功');
+        }
+
+        return $this->error($result['message'] ?? '测试获取面单失败');
+    }
+
+    /**
+     * 获取测试作用域 ID（不依赖 enabled 开关）
+     */
+    private function resolveScopeIdForTest(Request $request, string $scopeType): ?int
+    {
+        $scopeId = $request->input('scope_id');
+        if ($scopeId) {
+            return (int) $scopeId;
+        }
+        return $this->resolveTestScopeId($request, $request->user(), $scopeType);
+    }
+
+    /**
+     * 构建测试用系统配置（系统默认 + scope 覆盖，绕过 resolveForScope 的 enabled 检查）
+     */
+    private function buildTestChinapostConfig(string $scopeType, int $scopeId): array
+    {
+        $sys = SystemConfig::getByGroup('chinapost');
+
+        $record = LogisticsConfig::query()
+            ->where('scope_type', $scopeType)
+            ->where('scope_id', $scopeId)
+            ->where('provider', LogisticsConfigResolver::PROVIDER_CHINAPOST)
+            ->first();
+
+        if ($record && is_array($record->config)) {
+            $map = ['test_authorization', 'test_digest_key', 'prod_authorization', 'prod_digest_key', 'agreement_code', 'pickup_org_code'];
+            foreach ($map as $key) {
+                $value = $record->config[$key] ?? null;
+                if ($value !== null && $value !== '') {
+                    $sys[$key] = (string) $value;
+                }
+            }
+        }
+
+        return $sys;
+    }
+
+    private function resolveTestScopeId(Request $request, User $user, string $scopeType): ?int
+    {
+        if ($scopeType === 'team') {
+            return $this->resolveTeamScopeId($request, $user);
+        }
+        return $this->resolveUserScopeId($request, $user);
     }
 
     private function buildScopeProviderData(string $scopeType, ?int $scopeId, string $provider, LogisticsConfigResolver $resolver): array

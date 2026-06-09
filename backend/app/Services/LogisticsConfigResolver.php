@@ -71,6 +71,37 @@ class LogisticsConfigResolver
         ];
     }
 
+    /**
+     * 按指定的作用域解析配置（不依赖 Order，用于测试连接）
+     */
+    public function resolveForScope(string $scopeType, int $scopeId, string $provider): array
+    {
+        $provider = strtolower(trim($provider));
+        if (!in_array($scopeType, ['team', 'user'], true) || !in_array($provider, [self::PROVIDER_CHINAPOST, self::PROVIDER_SZ56T], true)) {
+            return ['source' => 'system', 'config' => []];
+        }
+
+        $switchKey = $scopeType === 'team' ? self::KEY_ENABLE_TEAM : self::KEY_ENABLE_USER;
+        if (!$this->isSwitchOn(SystemConfig::getByKey($switchKey, '0'))) {
+            return ['source' => 'system', 'config' => []];
+        }
+
+        $record = LogisticsConfig::query()
+            ->where('scope_type', $scopeType)
+            ->where('scope_id', $scopeId)
+            ->where('provider', $provider)
+            ->first();
+
+        if (!$record || !$record->enabled) {
+            return ['source' => 'system', 'config' => []];
+        }
+
+        return [
+            'source' => $scopeType,
+            'config' => is_array($record->config) ? $record->config : [],
+        ];
+    }
+
     public function isSwitchOn($value): bool
     {
         if (is_bool($value)) {
@@ -93,7 +124,6 @@ class LogisticsConfigResolver
                 'prod_digest_key',
                 'agreement_code',
                 'pickup_org_code',
-                'label_ak',
             ];
         }
 

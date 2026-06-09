@@ -40,16 +40,16 @@
             />
             <el-form label-width="160px" size="small" style="margin-top: 10px;">
               <el-form-item label="测试授权码">
-                <el-input v-model="teamScope.providers.chinapost.config.test_authorization" :disabled="!canEditTeam" />
+                <el-input v-model="teamScope.providers.chinapost.config.test_authorization" :disabled="!canEditTeam" placeholder="仅用于配置验证" />
               </el-form-item>
-              <el-form-item label="测试SM4密钥">
-                <el-input v-model="teamScope.providers.chinapost.config.test_digest_key" :disabled="!canEditTeam" />
+              <el-form-item label="测试签名密钥">
+                <el-input v-model="teamScope.providers.chinapost.config.test_digest_key" :disabled="!canEditTeam" placeholder="仅用于配置验证" />
               </el-form-item>
               <el-form-item label="正式授权码">
-                <el-input v-model="teamScope.providers.chinapost.config.prod_authorization" :disabled="!canEditTeam" />
+                <el-input v-model="teamScope.providers.chinapost.config.prod_authorization" :disabled="!canEditTeam" placeholder="实际业务使用" />
               </el-form-item>
-              <el-form-item label="正式SM4密钥">
-                <el-input v-model="teamScope.providers.chinapost.config.prod_digest_key" :disabled="!canEditTeam" />
+              <el-form-item label="正式签名密钥">
+                <el-input v-model="teamScope.providers.chinapost.config.prod_digest_key" :disabled="!canEditTeam" placeholder="实际业务使用" />
               </el-form-item>
               <el-form-item label="协议大客户号">
                 <el-input v-model="teamScope.providers.chinapost.config.agreement_code" :disabled="!canEditTeam" />
@@ -57,16 +57,29 @@
               <el-form-item label="揽收机构编号">
                 <el-input v-model="teamScope.providers.chinapost.config.pickup_org_code" :disabled="!canEditTeam" />
               </el-form-item>
-              <el-form-item label="面单AK">
-                <el-input v-model="teamScope.providers.chinapost.config.label_ak" :disabled="!canEditTeam" />
-              </el-form-item>
             </el-form>
-            <el-button
-              type="primary"
-              size="small"
-              :disabled="!canEditTeam || !switches.enable_team_logistics_config"
-              @click="saveScopeProvider('team', 'chinapost')"
-            >保存团队中国邮政配置</el-button>
+            <div style="display: flex; gap: 8px;">
+              <el-button
+                type="primary"
+                size="small"
+                :disabled="!canEditTeam || !switches.enable_team_logistics_config"
+                @click="saveScopeProvider('team', 'chinapost')"
+              >保存团队中国邮政配置</el-button>
+              <el-button
+                type="success"
+                size="small"
+                :disabled="!canEditTeam || !switches.enable_team_logistics_config || !teamScope.providers.chinapost.config.test_authorization"
+                :loading="testing.team.chinapostOrder"
+                @click="testChinaPostCreateOrder('team')"
+              >测试下单</el-button>
+              <el-button
+                type="warning"
+                size="small"
+                :disabled="!canEditTeam || !switches.enable_team_logistics_config || !teamWaybillNo"
+                :loading="testing.team.chinapostLabel"
+                @click="testChinaPostLabel('team')"
+              >测试面单</el-button>
+            </div>
           </div>
 
           <div class="provider-block">
@@ -78,7 +91,7 @@
             />
             <el-form label-width="160px" size="small" style="margin-top: 10px;">
               <el-form-item label="SZ56T_USERNAME">
-                <el-input v-model="teamScope.providers.sz56t.config.username" :disabled="!canEditTeam" />
+                <el-input v-model="teamScope.providers.sz56t.config.username" :disabled="!canEditTeam" @input="onSz56tInputChange('team')" />
               </el-form-item>
               <el-form-item label="SZ56T_PASSWORD">
                 <el-input v-model="teamScope.providers.sz56t.config.password" :disabled="!canEditTeam" show-password />
@@ -88,6 +101,7 @@
               type="primary"
               size="small"
               :disabled="!canEditTeam || !switches.enable_team_logistics_config"
+              :loading="saving.team.sz56t"
               @click="saveScopeProvider('team', 'sz56t')"
             >保存团队雷翼配置</el-button>
           </div>
@@ -126,16 +140,16 @@
             />
             <el-form label-width="160px" size="small" style="margin-top: 10px;">
               <el-form-item label="测试授权码">
-                <el-input v-model="userScope.providers.chinapost.config.test_authorization" />
+                <el-input v-model="userScope.providers.chinapost.config.test_authorization" placeholder="仅用于配置验证" />
               </el-form-item>
-              <el-form-item label="测试SM4密钥">
-                <el-input v-model="userScope.providers.chinapost.config.test_digest_key" />
+              <el-form-item label="测试签名密钥">
+                <el-input v-model="userScope.providers.chinapost.config.test_digest_key" placeholder="仅用于配置验证" />
               </el-form-item>
               <el-form-item label="正式授权码">
-                <el-input v-model="userScope.providers.chinapost.config.prod_authorization" />
+                <el-input v-model="userScope.providers.chinapost.config.prod_authorization" placeholder="实际业务使用" />
               </el-form-item>
-              <el-form-item label="正式SM4密钥">
-                <el-input v-model="userScope.providers.chinapost.config.prod_digest_key" />
+              <el-form-item label="正式签名密钥">
+                <el-input v-model="userScope.providers.chinapost.config.prod_digest_key" placeholder="实际业务使用" />
               </el-form-item>
               <el-form-item label="协议大客户号">
                 <el-input v-model="userScope.providers.chinapost.config.agreement_code" />
@@ -143,16 +157,29 @@
               <el-form-item label="揽收机构编号">
                 <el-input v-model="userScope.providers.chinapost.config.pickup_org_code" />
               </el-form-item>
-              <el-form-item label="面单AK">
-                <el-input v-model="userScope.providers.chinapost.config.label_ak" />
-              </el-form-item>
             </el-form>
-            <el-button
-              type="primary"
-              size="small"
-              :disabled="!switches.enable_user_logistics_config"
-              @click="saveScopeProvider('user', 'chinapost')"
-            >保存个人中国邮政配置</el-button>
+            <div style="display: flex; gap: 8px;">
+              <el-button
+                type="primary"
+                size="small"
+                :disabled="!switches.enable_user_logistics_config"
+                @click="saveScopeProvider('user', 'chinapost')"
+              >保存个人中国邮政配置</el-button>
+              <el-button
+                type="success"
+                size="small"
+                :disabled="!switches.enable_user_logistics_config || !userScope.providers.chinapost.config.test_authorization"
+                :loading="testing.user.chinapostOrder"
+                @click="testChinaPostCreateOrder('user')"
+              >测试下单</el-button>
+              <el-button
+                type="warning"
+                size="small"
+                :disabled="!switches.enable_user_logistics_config || !userWaybillNo"
+                :loading="testing.user.chinapostLabel"
+                @click="testChinaPostLabel('user')"
+              >测试面单</el-button>
+            </div>
           </div>
 
           <div class="provider-block">
@@ -174,6 +201,7 @@
               type="primary"
               size="small"
               :disabled="!switches.enable_user_logistics_config"
+              :loading="saving.user.sz56t"
               @click="saveScopeProvider('user', 'sz56t')"
             >保存个人雷翼配置</el-button>
           </div>
@@ -184,7 +212,7 @@
 </template>
 
 <script>
-import { fetchLogisticsConfigCurrent, saveLogisticsConfig, fetchUserList } from '@/api/system'
+import { fetchLogisticsConfigCurrent, saveLogisticsConfig, fetchUserList, testSz56tConnect, testChinaPostCreateOrder, testChinaPostLabel } from '@/api/system'
 import { fetchAllTeams } from '@/api/shop'
 import { mapGetters } from 'vuex'
 
@@ -202,8 +230,7 @@ function createEmptyScope() {
           prod_authorization: '',
           prod_digest_key: '',
           agreement_code: '',
-          pickup_org_code: '',
-          label_ak: ''
+          pickup_org_code: ''
         }
       },
       sz56t: {
@@ -231,7 +258,17 @@ export default {
       teamOptions: [],
       userOptions: [],
       selectedTeamId: null,
-      selectedUserId: null
+      selectedUserId: null,
+      saving: {
+        team: { sz56t: false },
+        user: { sz56t: false }
+      },
+      testing: {
+        team: { chinapostOrder: false, chinapostLabel: false },
+        user: { chinapostOrder: false, chinapostLabel: false }
+      },
+      teamWaybillNo: '',
+      userWaybillNo: ''
     }
   },
   computed: {
@@ -308,7 +345,6 @@ export default {
         enabled: !!scope.providers[provider].enabled,
         config: scope.providers[provider].config
       }
-      // 超管保存时显式传递 team_id / user_id，确保后端解析到正确的目标
       if (this.isSuperAdmin && scopeType === 'team' && this.selectedTeamId) {
         payload.team_id = this.selectedTeamId
       }
@@ -316,9 +352,103 @@ export default {
         payload.user_id = this.selectedUserId
       }
 
+      // 雷翼保存前先测试连接，通过才允许保存
+      if (provider === 'sz56t') {
+        this.saving[scopeType].sz56t = true
+        const testPayload = {
+          scope_type: scopeType,
+          scope_id: scope.scope_id
+        }
+        if (this.isSuperAdmin && scopeType === 'team' && this.selectedTeamId) {
+          testPayload.team_id = this.selectedTeamId
+        }
+        if (this.isSuperAdmin && scopeType === 'user' && this.selectedUserId) {
+          testPayload.user_id = this.selectedUserId
+        }
+        testSz56tConnect(testPayload).then((res) => {
+          this.$message.success('配置验证通过，正在保存…')
+          this.doSave(payload)
+        }).catch((err) => {
+          if (!err.alreadyNotified) {
+            this.$message.error((err && err.message) || '雷翼认证失败，请检查账号密码配置')
+          }
+        }).finally(() => {
+          this.saving[scopeType].sz56t = false
+        })
+        return
+      }
+
+      this.doSave(payload)
+    },
+    doSave(payload) {
       saveLogisticsConfig(payload).then(() => {
         this.$message.success('保存成功')
         this.fetchCurrent()
+      })
+    },
+    testChinaPostCreateOrder(scopeType) {
+      const scope = scopeType === 'team' ? this.teamScope : this.userScope
+      const payload = {
+        scope_type: scopeType,
+        scope_id: scope.scope_id
+      }
+      if (this.isSuperAdmin && scopeType === 'team' && this.selectedTeamId) {
+        payload.team_id = this.selectedTeamId
+      }
+      if (this.isSuperAdmin && scopeType === 'user' && this.selectedUserId) {
+        payload.user_id = this.selectedUserId
+      }
+
+      this.testing[scopeType].chinapostOrder = true
+      testChinaPostCreateOrder(payload).then((res) => {
+        const data = res.data || {}
+        const waybillNo = data.waybill_no || ''
+        if (scopeType === 'team') {
+          this.teamWaybillNo = waybillNo
+        } else {
+          this.userWaybillNo = waybillNo
+        }
+        const msg = (res && res.message) || ('测试下单成功，运单号: ' + waybillNo)
+        this.$alert(msg + '\n\n请前往中国邮政平台点击【上线】使配置生效。', '测试下单结果', {
+          confirmButtonText: '知道了',
+          type: 'success'
+        })
+      }).catch((err) => {
+        if (!err.alreadyNotified) {
+          this.$message.error((err && err.message) || '测试下单失败')
+        }
+      }).finally(() => {
+        this.testing[scopeType].chinapostOrder = false
+      })
+    },
+    testChinaPostLabel(scopeType) {
+      const scope = scopeType === 'team' ? this.teamScope : this.userScope
+      const waybillNo = scopeType === 'team' ? this.teamWaybillNo : this.userWaybillNo
+      const payload = {
+        scope_type: scopeType,
+        scope_id: scope.scope_id,
+        waybill_no: waybillNo
+      }
+      if (this.isSuperAdmin && scopeType === 'team' && this.selectedTeamId) {
+        payload.team_id = this.selectedTeamId
+      }
+      if (this.isSuperAdmin && scopeType === 'user' && this.selectedUserId) {
+        payload.user_id = this.selectedUserId
+      }
+
+      this.testing[scopeType].chinapostLabel = true
+      testChinaPostLabel(payload).then((res) => {
+        const msg = (res && res.message) || '测试获取面单成功'
+        this.$alert(msg, '测试面单结果', {
+          confirmButtonText: '知道了',
+          type: 'success'
+        })
+      }).catch((err) => {
+        if (!err.alreadyNotified) {
+          this.$message.error((err && err.message) || '测试获取面单失败')
+        }
+      }).finally(() => {
+        this.testing[scopeType].chinapostLabel = false
       })
     }
   }
@@ -337,4 +467,5 @@ export default {
   font-weight: 600;
   margin-bottom: 8px;
 }
+
 </style>

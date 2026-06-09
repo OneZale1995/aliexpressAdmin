@@ -105,7 +105,7 @@
         </template>
       </el-table-column>
       <el-table-column label="店铺" align="center" width="140">
-        <template slot-scope="{row}">{{ row.shop ? row.shop.name : '-' }}</template>
+        <template slot-scope="{row}">{{ row.shop_name || '-' }}</template>
       </el-table-column>
       <el-table-column label="创建时间" prop="ae_created_at" align="center" width="160" />
     </el-table>

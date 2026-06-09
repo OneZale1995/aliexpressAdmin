@@ -67,16 +67,42 @@ class ProductController extends Controller
         $limit = (int) $request->get('limit', 20);
 
         $total = $query->count();
-        $items = (clone $query)
+
+        // Deferred join: 先只查 id 走索引快速定位分页位置，再回表取完整数据
+        $ids = (clone $query)->select('id')
             ->offset(($page - 1) * $limit)
             ->limit($limit)
+            ->pluck('id');
+
+        if ($ids->isEmpty()) {
+            return $this->success(['total' => $total, 'items' => []]);
+        }
+
+        $items = Product::query()
+            ->select([
+                'id', 'shop_id', 'ae_item_id', 'category_id',
+                'title_en', 'title_ru', 'main_image_url', 'price', 'status_type',
+                'media', 'ae_created_at',
+            ])
+            ->whereIn('id', $ids->all())
+            ->orderBy('category_id')
+            ->orderBy('ae_item_id')
             ->get();
 
-        $items = $items->map(function ($p) {
+        // 一次查询补齐店铺和类目名称
+        $shopMap = $this->cachedShopMap();
+        $catIds = $items->pluck('category_id')->unique()->filter()->all();
+        $catNameMap = !empty($catIds)
+            ? \App\Models\AliCategory::whereIn('category_id', $catIds)->pluck('name', 'category_id')
+            : collect();
+
+        $items = $items->map(function ($p) use ($shopMap, $catNameMap) {
                 $data = $p->toArray();
                 if (empty($data['main_image_url'])) {
                     $data['main_image_url'] = $this->extractProductImages($p)[0] ?? '';
                 }
+                $data['shop_name'] = $shopMap[(int) $p->shop_id] ?? '';
+                $data['category_name'] = $catNameMap[$p->category_id] ?? '';
                 unset($data['media']);
                 return $data;
             });
@@ -958,5 +984,12 @@ class ProductController extends Controller
     private function isTeamAdmin($user): bool
     {
         return Team::where('admin_user_id', $user->id)->exists();
+    }
+
+    private function cachedShopMap(): array
+    {
+        return \Illuminate\Support\Facades\Cache::remember('shops:map:id-name', 300, function () {
+            return Shop::pluck('name', 'id')->map(fn ($v) => (string) $v)->toArray();
+        });
     }
 }

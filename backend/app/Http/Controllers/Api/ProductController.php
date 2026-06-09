@@ -34,14 +34,11 @@ class ProductController extends Controller
     {
         $user = $request->user();
 
-        $query = Product::with('shop:id,name,logistics_route,logistics_template_id,logistics_template_name')
+        $query = Product::with('shop:id,name')
             ->select([
                 'id', 'shop_id', 'ae_item_id', 'category_id', 'category_name',
                 'title_en', 'title_ru', 'main_image_url', 'price', 'status_type',
-                'delivery_time', 'gross_weight', 'bulk_discount', 'bulk_order',
-                'lot_num', 'media', 'skus',
-                'ae_created_at', 'ae_updated_at', 'synced_at',
-                'created_at', 'updated_at',
+                'media', 'ae_created_at',
             ])
             ->orderBy('category_id')
             ->orderBy('ae_item_id');
@@ -80,8 +77,7 @@ class ProductController extends Controller
                 if (empty($data['main_image_url'])) {
                     $data['main_image_url'] = $this->extractProductImages($p)[0] ?? '';
                 }
-                $data['sku_count'] = is_array($p->skus) ? count($p->skus) : 0;
-                unset($data['raw_data'], $data['skus'], $data['properties'], $data['media']);
+                unset($data['media']);
                 return $data;
             });
 

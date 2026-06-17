@@ -71,6 +71,86 @@ class LogisticsConfigResolver
         ];
     }
 
+    public function validateRequiredTeamProviderConfigForOrder(?Order $order, string $provider): array
+    {
+        $provider = strtolower(trim($provider));
+        if (!in_array($provider, [self::PROVIDER_CHINAPOST, self::PROVIDER_SZ56T], true)) {
+            return [
+                'success' => true,
+                'required' => false,
+            ];
+        }
+
+        if (!$this->isSwitchOn(SystemConfig::getByKey(self::KEY_ENABLE_TEAM, '0'))) {
+            return [
+                'success' => true,
+                'required' => false,
+            ];
+        }
+
+        $providerLabel = $this->providerLabel($provider);
+
+        if (!$order || !$order->shop) {
+            return [
+                'success' => false,
+                'message' => '订单关联店铺不存在，无法校验团队' . $providerLabel . '配置',
+                'provider' => $provider,
+            ];
+        }
+
+        $shop = $order->shop;
+        if (empty($shop->team_id)) {
+            return [
+                'success' => false,
+                'message' => '团队物流配置已开启，当前订单店铺未关联团队，请先为店铺配置团队后再进行 DBS 发货',
+                'provider' => $provider,
+            ];
+        }
+
+        $teamConfig = LogisticsConfig::query()
+            ->where('scope_type', 'team')
+            ->where('scope_id', (int) $shop->team_id)
+            ->where('provider', $provider)
+            ->first();
+
+        $teamName = $this->resolveOrderTeamName($order);
+        $teamLabel = $teamName !== '' ? '「' . $teamName . '」' : 'ID ' . (int) $shop->team_id;
+
+        if (!$teamConfig || !$teamConfig->enabled) {
+            return [
+                'success' => false,
+                'message' => '团队物流配置已开启，请先到【店铺 > 物流配置】为团队' . $teamLabel . '启用' . $providerLabel . '配置后再下单',
+                'provider' => $provider,
+                'team_id' => (int) $shop->team_id,
+            ];
+        }
+
+        $config = is_array($teamConfig->config) ? $teamConfig->config : [];
+        $missing = [];
+        foreach ($this->requiredTeamProviderKeys($provider) as $key => $label) {
+            if (trim((string) ($config[$key] ?? '')) === '') {
+                $missing[] = $label;
+            }
+        }
+
+        if (!empty($missing)) {
+            return [
+                'success' => false,
+                'message' => '团队物流配置已开启，团队' . $teamLabel . '的' . $providerLabel . '配置缺少' . implode('、', $missing) . '，请先到【店铺 > 物流配置】补全后再下单',
+                'provider' => $provider,
+                'team_id' => (int) $shop->team_id,
+                'missing' => array_values($missing),
+            ];
+        }
+
+        return [
+            'success' => true,
+            'required' => true,
+            'provider' => $provider,
+            'team_id' => (int) $shop->team_id,
+        ];
+    }
+
     /**
      * 按指定的作用域解析配置（不依赖 Order，用于测试连接）
      */
@@ -186,6 +266,43 @@ class LogisticsConfigResolver
         }
 
         return $config;
+    }
+
+    private function providerLabel(string $provider): string
+    {
+        return match (strtolower(trim($provider))) {
+            self::PROVIDER_CHINAPOST => '中国邮政',
+            self::PROVIDER_SZ56T => '雷翼',
+            default => '物流',
+        };
+    }
+
+    private function requiredTeamProviderKeys(string $provider): array
+    {
+        return match (strtolower(trim($provider))) {
+            self::PROVIDER_CHINAPOST => [
+                'prod_authorization' => '正式授权码',
+                'prod_digest_key' => '正式签名密钥',
+                'agreement_code' => '协议大客户号',
+                'pickup_org_code' => '揽收机构编号',
+            ],
+            self::PROVIDER_SZ56T => [
+                'username' => 'SZ56T_USERNAME',
+                'password' => 'SZ56T_PASSWORD',
+            ],
+            default => [],
+        };
+    }
+
+    private function resolveOrderTeamName(Order $order): string
+    {
+        if (!$order->relationLoaded('shop') || !$order->shop) {
+            return '';
+        }
+
+        $order->shop->loadMissing('team');
+
+        return trim((string) data_get($order, 'shop.team.name', ''));
     }
 
     private function mergeNonEmpty(array $base, array $overlay): array

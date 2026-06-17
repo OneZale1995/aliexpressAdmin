@@ -255,6 +255,7 @@ export default {
       shipForm: createDefaultShipForm(),
       sz56tProductOptions: [],
       sz56tProductLoading: false,
+      sz56tProductOptionsOrderId: null,
       commentDialogVisible: false,
       commentTemp: createDefaultCommentTemp(),
       uploadUrl: process.env.VUE_APP_BASE_API + '/files/upload',
@@ -860,6 +861,11 @@ export default {
     getCurrentShipOrder() {
       return this.list.find(order => order.id === this.shipForm.id) || null
     },
+    isTeamLogisticsConfigEnabled() {
+      const bootstrap = this.$store && this.$store.getters ? (this.$store.getters.bootstrap || {}) : {}
+      const switches = bootstrap.logistics_switches || {}
+      return switches.enable_team_logistics_config === true || switches.enable_team_logistics_config === 1 || switches.enable_team_logistics_config === '1'
+    },
     buildFbsItemsPayload() {
       return (this.shipForm.items || [])
         .map(item => {
@@ -964,15 +970,32 @@ export default {
     },
     handleDbsProviderSelect(provider) {
       this.shipForm.ship_provider = provider
+      const loading = this.$loading({
+        lock: true,
+        text: '正在检查团队物流配置...',
+        spinner: 'el-icon-loading',
+        background: 'rgba(255, 255, 255, 0.5)'
+      })
+
       if (provider === 'chinapost') {
-        this.chinaPostDialogVisible = true
-        this.ensureChinaPostPreview()
+        this.ensureChinaPostPreview(false, { throwOnError: true }).then(() => {
+          this.chinaPostDialogVisible = true
+        }).catch(err => {
+          this.showError(err, '请先配置团队中国邮政物流')
+        }).finally(() => {
+          loading.close()
+        })
       } else {
-        this.leiyiDialogVisible = true
-        this.ensureSz56tProductOptions()
+        this.ensureSz56tProductOptions(false, { throwOnError: true }).then(() => {
+          this.leiyiDialogVisible = true
+        }).catch(err => {
+          this.showError(err, '请先配置团队雷翼物流')
+        }).finally(() => {
+          loading.close()
+        })
       }
     },
-    ensureChinaPostPreview(force = false) {
+    ensureChinaPostPreview(force = false, options = {}) {
       if (!this.shipForm.id || this.shipForm.ship_provider !== 'chinapost') {
         return Promise.resolve()
       }
@@ -1039,6 +1062,9 @@ export default {
           this.$set(this.shipForm, 'chinapost_items', backendItems.map(item => this.normalizeChinaPostItemForSubmit(item, { forceRandomDeclaredValue: true })))
         }
       }).catch(err => {
+        if (options.throwOnError) {
+          throw err
+        }
         this.showError(err, '获取中国邮政请求参数失败')
       })
     },
@@ -1192,31 +1218,45 @@ export default {
         // ignore localStorage quota or private mode failures
       }
     },
-    ensureSz56tProductOptions(force = false) {
+    ensureSz56tProductOptions(force = false, options = {}) {
       if (this.sz56tProductLoading) {
-        return
+        return Promise.resolve()
       }
 
-      if (!force && this.sz56tProductOptions.length) {
-        return
+      const requireOrderScopedConfig = this.isTeamLogisticsConfigEnabled() && this.shipForm.id
+
+      if (requireOrderScopedConfig && !force && this.sz56tProductOptions.length && this.sz56tProductOptionsOrderId === this.shipForm.id) {
+        return Promise.resolve()
       }
 
-      if (!force) {
+      if (!requireOrderScopedConfig && !force && this.sz56tProductOptions.length) {
+        return Promise.resolve()
+      }
+
+      if (!requireOrderScopedConfig && !force) {
         const cachedItems = this.getSz56tProductCache()
         if (cachedItems && cachedItems.length) {
           this.sz56tProductOptions = cachedItems
-          return
+          this.sz56tProductOptionsOrderId = null
+          return Promise.resolve()
         }
       }
 
       this.sz56tProductLoading = true
-      fetchSz56tProductList({ refresh: force }).then(res => {
+      return fetchSz56tProductList({
+        refresh: force,
+        id: this.shipForm.id || undefined
+      }).then(res => {
         const items = (res.data && res.data.items) || []
         this.sz56tProductOptions = items
-        if (items.length) {
+        this.sz56tProductOptionsOrderId = requireOrderScopedConfig ? this.shipForm.id : null
+        if (!requireOrderScopedConfig && items.length) {
           this.setSz56tProductCache(items)
         }
       }).catch(err => {
+        if (options.throwOnError) {
+          throw err
+        }
         this.showError(err, '获取雷翼运输方式失败')
       }).finally(() => {
         this.sz56tProductLoading = false

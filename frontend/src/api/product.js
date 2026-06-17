@@ -8,6 +8,18 @@ export function syncShopProducts(data) {
   return request({ url: '/products/sync-shop', method: 'post', data })
 }
 
+export function createProductOnAliExpress(data) {
+  return request({ url: '/products/create-on-aliexpress', method: 'post', data, timeout: 0 })
+}
+
+export function batchCreateProductsOnAliExpress(data) {
+  return request({ url: '/products/batch-create-on-aliexpress', method: 'post', data, timeout: 0 })
+}
+
+export function fetchProductCreateTaskStatus(data) {
+  return request({ url: '/products/create-task-status', method: 'post', data })
+}
+
 export function startProductExport(data) {
   return request({
     url: '/products/export',

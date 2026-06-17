@@ -11,7 +11,9 @@ use App\Models\Product;
 use App\Models\ProductExportTask;
 use App\Models\Shop;
 use App\Models\Team;
+use App\Services\AliExpressProductCreateService;
 use App\Services\ProductExportService;
+use App\Services\ProductSyncStateService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -845,6 +847,258 @@ class ProductController extends Controller
         return $this->success(['sync_queue' => $syncState], $message);
     }
 
+    public function createOnAliExpress(Request $request, AliExpressProductCreateService $createService)
+    {
+        $validated = $request->validate([
+            'product_id' => 'required|integer|exists:products,id',
+            'target_shop_id' => 'nullable|integer|exists:shops,id',
+            'dry_run' => 'nullable|boolean',
+            'external_id' => 'nullable|string|max:128',
+            'language' => 'nullable|in:ru,en,tr',
+            'freight_template_id' => 'nullable|integer',
+            'product_unit' => 'nullable|integer|in:100000013,100000014,100000015,100000017,100000019',
+            'shipping_lead_time' => 'nullable|integer|min:1|max:30',
+            'unique_sku' => 'nullable|boolean',
+        ]);
+
+        $query = Product::with('shop')->whereKey((int) $validated['product_id']);
+        $this->applyPermissionScope($query, $request->user());
+
+        /** @var Product|null $product */
+        $product = $query->first();
+        if (!$product) {
+            return $this->error('商品不存在或无权操作');
+        }
+
+        $targetShop = !empty($validated['target_shop_id'])
+            ? $this->findAccessibleShop($request, (int) $validated['target_shop_id'])
+            : $product->shop;
+
+        if (!$targetShop) {
+            return $this->error('目标店铺不存在或无权操作');
+        }
+
+        if (!$targetShop->access_token) {
+            return $this->error('目标店铺未配置 access_token');
+        }
+
+        $targetShop->makeVisible('access_token');
+
+        try {
+            $options = [
+                'external_id' => $validated['external_id'] ?? null,
+                'language' => $validated['language'] ?? 'ru',
+                'freight_template_id' => $this->resolveTargetFreightTemplateId($targetShop, $validated['freight_template_id'] ?? null),
+                'product_unit' => $validated['product_unit'] ?? 100000015,
+                'shipping_lead_time' => $validated['shipping_lead_time'] ?? null,
+                'unique_sku' => $validated['unique_sku'] ?? true,
+            ];
+
+            if ($request->boolean('dry_run')) {
+                return $this->success([
+                    'source_shop_id' => $product->shop_id,
+                    'target_shop_id' => $targetShop->id,
+                    'source_product_id' => $product->id,
+                    'source_ae_item_id' => $product->ae_item_id,
+                    'payload' => $createService->buildPayload($product, $options),
+                ]);
+            }
+
+            $result = $createService->createFromProduct($targetShop, $product, $options);
+
+            return $this->success([
+                'source_shop_id' => $product->shop_id,
+                'target_shop_id' => $targetShop->id,
+                'source_product_id' => $product->id,
+                'source_ae_item_id' => $product->ae_item_id,
+                'http_status' => $result['http_status'],
+                'response' => $result['response'],
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            return $this->error($e->getMessage());
+        } catch (\Throwable $e) {
+            return $this->error('创建商品请求失败: ' . $e->getMessage());
+        }
+    }
+
+    public function batchCreateOnAliExpress(Request $request, AliExpressProductCreateService $createService)
+    {
+        $validated = $request->validate([
+            'shop_id' => 'nullable|integer|exists:shops,id',
+            'source_shop_id' => 'nullable|integer|exists:shops,id',
+            'target_shop_id' => 'nullable|integer|exists:shops,id',
+            'limit' => 'nullable|integer|min:1|max:2000',
+            'chunk_size' => 'nullable|integer|min:1|max:1000',
+            'dry_run' => 'nullable|boolean',
+            'product_ids' => 'nullable|array|max:2000',
+            'product_ids.*' => 'integer|exists:products,id',
+            'language' => 'nullable|in:ru,en,tr',
+            'freight_template_id' => 'nullable|integer',
+            'product_unit' => 'nullable|integer|in:100000013,100000014,100000015,100000017,100000019',
+            'shipping_lead_time' => 'nullable|integer|min:1|max:30',
+            'unique_sku' => 'nullable|boolean',
+        ]);
+
+        $sourceShopId = (int) ($validated['source_shop_id'] ?? $validated['shop_id'] ?? 0);
+        $targetShopId = (int) ($validated['target_shop_id'] ?? $validated['shop_id'] ?? 0);
+
+        if ($sourceShopId <= 0 || $targetShopId <= 0) {
+            return $this->error('请传 source_shop_id 和 target_shop_id；兼容旧参数时可只传 shop_id');
+        }
+
+        $sourceShop = $this->findAccessibleShop($request, $sourceShopId);
+        if (!$sourceShop) {
+            return $this->error('来源店铺不存在或无权操作');
+        }
+
+        $targetShop = $this->findAccessibleShop($request, $targetShopId);
+        if (!$targetShop) {
+            return $this->error('目标店铺不存在或无权操作');
+        }
+
+        if (!$targetShop->access_token) {
+            return $this->error('目标店铺未配置 access_token');
+        }
+
+        $targetShop->makeVisible('access_token');
+
+        $limit = (int) ($validated['limit'] ?? 2000);
+        $chunkSize = min(1000, (int) ($validated['chunk_size'] ?? 1000));
+        $options = [
+            'language' => $validated['language'] ?? 'ru',
+            'freight_template_id' => $this->resolveTargetFreightTemplateId($targetShop, $validated['freight_template_id'] ?? null),
+            'product_unit' => $validated['product_unit'] ?? 100000015,
+            'shipping_lead_time' => $validated['shipping_lead_time'] ?? null,
+            'unique_sku' => $validated['unique_sku'] ?? true,
+        ];
+
+        $query = Product::query()
+            ->where('shop_id', $sourceShop->id)
+            ->where('category_id', '<>', '')
+            ->where('freight_template_id', '<>', '')
+            ->whereNotNull('skus')
+            ->where(function ($innerQuery) {
+                $innerQuery->where('main_image_url', '<>', '')
+                    ->orWhereNotNull('media')
+                    ->orWhereNotNull('marketing_images');
+            })
+            ->orderByDesc('synced_at')
+            ->orderByDesc('id');
+
+        if (!empty($validated['product_ids'])) {
+            $query->whereIn('id', array_map('intval', $validated['product_ids']));
+        }
+
+        $productsPayload = [];
+        $sourceProducts = [];
+        $skipped = [];
+
+        foreach ($query->cursor() as $product) {
+            if (count($productsPayload) >= $limit) {
+                break;
+            }
+
+            try {
+                $payload = $createService->buildPayload($product, $options);
+                $productsPayload[] = $payload['products'][0];
+                $sourceProducts[] = [
+                    'id' => $product->id,
+                    'ae_item_id' => $product->ae_item_id,
+                    'category_id' => $product->category_id,
+                    'external_id' => $payload['products'][0]['external_id'] ?? '',
+                    'sku_count' => count($payload['products'][0]['sku_info_list'] ?? []),
+                ];
+            } catch (\Throwable $e) {
+                $skipped[] = [
+                    'id' => $product->id,
+                    'ae_item_id' => $product->ae_item_id,
+                    'reason' => $e->getMessage(),
+                ];
+            }
+        }
+
+        if (empty($productsPayload)) {
+            return $this->error('没有可创建的商品', 40000, ['skipped' => array_slice($skipped, 0, 50)]);
+        }
+
+        $chunks = array_chunk($productsPayload, $chunkSize);
+        $summary = [
+            'source_shop_id' => $sourceShop->id,
+            'source_shop_name' => $sourceShop->name,
+            'target_shop_id' => $targetShop->id,
+            'target_shop_name' => $targetShop->name,
+            'requested_limit' => $limit,
+            'buildable_count' => count($productsPayload),
+            'skipped_count' => count($skipped),
+            'chunk_size' => $chunkSize,
+            'chunk_count' => count($chunks),
+            'dry_run' => $request->boolean('dry_run'),
+        ];
+
+        if ($request->boolean('dry_run')) {
+            return $this->success([
+                'summary' => $summary,
+                'source_products_sample' => array_slice($sourceProducts, 0, 20),
+                'skipped_sample' => array_slice($skipped, 0, 50),
+                'payload_sample' => ['products' => array_slice($productsPayload, 0, 3)],
+            ]);
+        }
+
+        $results = [];
+        foreach ($chunks as $index => $chunkProducts) {
+            try {
+                $result = $createService->createPayload($targetShop, ['products' => $chunkProducts], $options);
+                $response = is_array($result['response']) ? $result['response'] : ['raw' => $result['response']];
+                $results[] = [
+                    'chunk_index' => $index + 1,
+                    'product_count' => count($chunkProducts),
+                    'http_status' => $result['http_status'],
+                    'group_id' => $response['group_id'] ?? null,
+                    'response' => $response,
+                ];
+            } catch (\Throwable $e) {
+                $results[] = [
+                    'chunk_index' => $index + 1,
+                    'product_count' => count($chunkProducts),
+                    'http_status' => null,
+                    'group_id' => null,
+                    'error' => $e->getMessage(),
+                ];
+            }
+        }
+
+        return $this->success([
+            'summary' => $summary,
+            'results' => $results,
+            'skipped_sample' => array_slice($skipped, 0, 50),
+        ]);
+    }
+
+    public function createTaskStatus(Request $request, AliExpressProductCreateService $createService)
+    {
+        $validated = $request->validate([
+            'shop_id' => 'required|integer|exists:shops,id',
+            'group_id' => 'required|string|max:64',
+        ]);
+
+        $shop = $this->findAccessibleShop($request, (int) $validated['shop_id']);
+        if (!$shop) {
+            return $this->error('店铺不存在或无权操作');
+        }
+
+        if (!$shop->access_token) {
+            return $this->error('店铺未配置 access_token');
+        }
+
+        $shop->makeVisible('access_token');
+
+        try {
+            return $this->success($createService->getTaskStatus($shop, (string) $validated['group_id']));
+        } catch (\Throwable $e) {
+            return $this->error('查询创建任务失败: ' . $e->getMessage());
+        }
+    }
+
     private function extractExportOptions(Request $request): array
     {
         return $this->normalizeExportOptions([
@@ -985,6 +1239,47 @@ class ProductController extends Controller
     private function isTeamAdmin($user): bool
     {
         return Team::where('admin_user_id', $user->id)->exists();
+    }
+
+    private function findAccessibleShop(Request $request, int $shopId): ?Shop
+    {
+        $user = $request->user();
+        $query = Shop::query()->whereKey($shopId);
+
+        if ($user->hasRole('super-admin')) {
+            return $query->first();
+        }
+
+        if ($this->isTeamAdmin($user)) {
+            $teamIds = Team::where('admin_user_id', $user->id)->pluck('id');
+            return $query->whereIn('team_id', $teamIds)->first();
+        }
+
+        return $query->where('user_id', $user->id)->first();
+    }
+
+    private function resolveTargetFreightTemplateId(Shop $targetShop, mixed $requestValue = null): ?int
+    {
+        $requestValue = trim((string) ($requestValue ?? ''));
+        if ($requestValue !== '' && $requestValue !== '0') {
+            return (int) $requestValue;
+        }
+
+        $shopTemplateId = trim((string) ($targetShop->logistics_template_id ?? ''));
+        if ($shopTemplateId !== '' && $shopTemplateId !== '0') {
+            return (int) $shopTemplateId;
+        }
+
+        $productTemplateId = Product::query()
+            ->where('shop_id', $targetShop->id)
+            ->where('freight_template_id', '<>', '')
+            ->orderByDesc('synced_at')
+            ->orderByDesc('id')
+            ->value('freight_template_id');
+
+        $productTemplateId = trim((string) $productTemplateId);
+
+        return $productTemplateId !== '' && $productTemplateId !== '0' ? (int) $productTemplateId : null;
     }
 
     private function cachedShopMap(): array

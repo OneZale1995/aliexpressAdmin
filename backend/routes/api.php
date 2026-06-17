@@ -150,6 +150,9 @@ Route::middleware(['auth:sanctum', 'operation.log'])->group(function () {
     Route::post('/products/export-download', [ProductController::class, 'downloadExport']);
     Route::post('/products/export-delete', [ProductController::class, 'deleteExport']);
     Route::post('/products/sync-shop', [ProductController::class, 'syncShop']);
+    Route::post('/products/create-on-aliexpress', [ProductController::class, 'createOnAliExpress']);
+    Route::post('/products/batch-create-on-aliexpress', [ProductController::class, 'batchCreateOnAliExpress']);
+    Route::post('/products/create-task-status', [ProductController::class, 'createTaskStatus']);
 
     // 订单管理
     Route::post('/orders/list', [OrderController::class, 'index']);

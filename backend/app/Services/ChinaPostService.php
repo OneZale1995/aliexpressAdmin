@@ -255,7 +255,9 @@ class ChinaPostService
         $jsonContent = json_encode($testPayload, JSON_UNESCAPED_UNICODE);
         $encrypted = $this->encryptLogitcsInterface($jsonContent, $testKey);
         if ($encrypted === null) {
-            return ['success' => false, 'message' => '报文加密失败，请检查测试签名密钥格式(Base64,16字节SM4)'];
+            $keyBin = base64_decode($testKey, true);
+            $keyLen = $keyBin !== false ? strlen($keyBin) : 'decode-failed';
+            return ['success' => false, 'message' => "报文加密失败，签名密钥长度={$keyLen}(需16字节SM4)，请检查系统配置chinapost.test_digest_key"];
         }
 
         $params = [

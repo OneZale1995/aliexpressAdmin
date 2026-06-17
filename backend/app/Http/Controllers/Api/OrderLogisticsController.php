@@ -94,6 +94,11 @@ class OrderLogisticsController extends Controller
         $dbsShipment = null;
 
         if ($isDbs) {
+            $providerCode = $this->resolveRequestedDbsProviderCode($order, $request);
+            if ($response = $this->ensureRequiredTeamLogisticsProvider($order, $providerCode)) {
+                return $response;
+            }
+
             $dbsShipment = $this->prepareDbsShipment($order, $request);
             if (!$dbsShipment['success']) {
                 return $this->error($dbsShipment['message'] ?? 'DBS 发货准备失败', 40000, $dbsShipment['data'] ?? []);
@@ -272,6 +277,9 @@ class OrderLogisticsController extends Controller
         if (strtoupper($order->logistics_type ?? '') !== 'DBS') {
             return $this->error('当前订单不是 DBS 模式');
         }
+        if ($response = $this->ensureRequiredTeamLogisticsProvider($order, LogisticsConfigResolver::PROVIDER_CHINAPOST)) {
+            return $response;
+        }
 
         $trackingNumber = trim((string) $request->input('track_number', ''));
 
@@ -357,6 +365,9 @@ class OrderLogisticsController extends Controller
 
         if (strtoupper($order->logistics_type ?? '') !== 'DBS') {
             return $this->error('当前订单不是 DBS 模式');
+        }
+        if ($response = $this->ensureRequiredTeamLogisticsProvider($order, LogisticsConfigResolver::PROVIDER_SZ56T)) {
+            return $response;
         }
 
         $trackingNumber = trim((string) $request->input('track_number', ''));
@@ -615,6 +626,12 @@ class OrderLogisticsController extends Controller
         ]);
 
         $order = Order::with(['shop', 'items', 'currentLogistics'])->findOrFail($request->id);
+        if ($response = $this->ensureOrderHasShop($order)) {
+            return $response;
+        }
+        if ($response = $this->ensureRequiredTeamLogisticsProvider($order, LogisticsConfigResolver::PROVIDER_CHINAPOST)) {
+            return $response;
+        }
         $service = new ChinaPostService($order);
         $options = $this->normalizeChinaPostOrderOptions($order, $request->except(['id']));
         if ($message = $this->validateChinaPostOrderOptions($options)) {
@@ -655,6 +672,12 @@ class OrderLogisticsController extends Controller
         ]);
 
         $order = Order::with(['shop', 'items', 'currentLogistics'])->findOrFail($request->id);
+        if ($response = $this->ensureOrderHasShop($order)) {
+            return $response;
+        }
+        if ($response = $this->ensureRequiredTeamLogisticsProvider($order, LogisticsConfigResolver::PROVIDER_CHINAPOST)) {
+            return $response;
+        }
         $options = $this->normalizeChinaPostOrderOptions($order, $request->except(['id']));
         if ($message = $this->validateChinaPostOrderOptions($options)) {
             return $this->error($message);
@@ -689,6 +712,12 @@ class OrderLogisticsController extends Controller
         ]);
 
         $order = Order::with(['shop', 'items', 'currentLogistics'])->findOrFail($request->id);
+        if ($response = $this->ensureOrderHasShop($order)) {
+            return $response;
+        }
+        if ($response = $this->ensureRequiredTeamLogisticsProvider($order, LogisticsConfigResolver::PROVIDER_CHINAPOST)) {
+            return $response;
+        }
         $result = $this->allocateChinaPostBarcode($order, $request->except(['id']));
 
         if ($result['success']) {
@@ -806,6 +835,12 @@ class OrderLogisticsController extends Controller
         ]);
 
         $order = Order::with(['shop', 'items', 'currentLogistics'])->findOrFail($request->id);
+        if ($response = $this->ensureOrderHasShop($order)) {
+            return $response;
+        }
+        if ($response = $this->ensureRequiredTeamLogisticsProvider($order, LogisticsConfigResolver::PROVIDER_SZ56T)) {
+            return $response;
+        }
         $options = $this->buildSz56tOrderOptions($request);
         if ($message = $this->validateSz56tOrderOptions($options)) {
             return $this->error($message);
@@ -838,6 +873,9 @@ class OrderLogisticsController extends Controller
         $order = null;
         if ($request->filled('id')) {
             $order = Order::with(['shop'])->find((int) $request->id);
+        }
+        if ($order && ($response = $this->ensureRequiredTeamLogisticsProvider($order, LogisticsConfigResolver::PROVIDER_SZ56T))) {
+            return $response;
         }
 
         $service = new Sz56tService($order);
@@ -1591,6 +1629,53 @@ class OrderLogisticsController extends Controller
         }
 
         return null;
+    }
+
+    private function ensureRequiredTeamLogisticsProvider(Order $order, string $provider)
+    {
+        $provider = $this->normalizeDbsProviderCode($provider);
+        if (!in_array($provider, [LogisticsConfigResolver::PROVIDER_CHINAPOST, LogisticsConfigResolver::PROVIDER_SZ56T], true)) {
+            $resolver = new LogisticsConfigResolver();
+            $switchOn = $resolver->isSwitchOn(\App\Models\SystemConfig::getByKey(LogisticsConfigResolver::KEY_ENABLE_TEAM, '0'));
+            if ($switchOn) {
+                return $this->error('团队物流配置已开启，DBS 发货必须选择已配置的中国邮政或雷翼渠道');
+            }
+
+            return null;
+        }
+
+        $result = (new LogisticsConfigResolver())->validateRequiredTeamProviderConfigForOrder($order, $provider);
+        if (!($result['success'] ?? false)) {
+            return $this->error($result['message'] ?? '请先完成团队物流配置', 40000, [
+                'provider' => $provider,
+                'team_id' => $result['team_id'] ?? null,
+                'missing' => $result['missing'] ?? [],
+            ]);
+        }
+
+        return null;
+    }
+
+    private function normalizeDbsProviderCode(string $provider): string
+    {
+        $provider = strtolower(trim($provider));
+
+        if ($provider === 'leiyi') {
+            return LogisticsConfigResolver::PROVIDER_SZ56T;
+        }
+
+        return $provider;
+    }
+
+    private function resolveRequestedDbsProviderCode(Order $order, Request $request): string
+    {
+        $provider = (string) $request->input('ship_provider', '');
+        if (trim($provider) !== '') {
+            return $this->normalizeDbsProviderCode($provider);
+        }
+
+        $templateProvider = $this->orderLogisticsService()->resolveProviderCodeByTemplate($order->logistics_template);
+        return $this->normalizeDbsProviderCode((string) ($templateProvider ?: 'manual'));
     }
 
     private function orderLogisticsService(): OrderLogisticsService
